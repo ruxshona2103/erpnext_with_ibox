@@ -91,6 +91,15 @@ app_license = "mit"
 # before_uninstall = "erpnext_with_ibox.uninstall.before_uninstall"
 # after_uninstall = "erpnext_with_ibox.uninstall.after_uninstall"
 
+# Fixtures
+# --------
+fixtures = [
+    {
+        "dt": "Custom Field",
+        "filters": [["module", "=", "ibox"]]
+    }
+]
+
 # Integration Setup
 # ------------------
 # To set up dependencies/integrations with other apps
@@ -148,23 +157,13 @@ app_license = "mit"
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"erpnext_with_ibox.tasks.all"
-# 	],
-# 	"daily": [
-# 		"erpnext_with_ibox.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"erpnext_with_ibox.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"erpnext_with_ibox.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"erpnext_with_ibox.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"cron": {
+		"0 23 * * *": [
+			"erpnext_with_ibox.ibox.sync.runner.sync_all_clients"
+		]
+	}
+}
 
 # Testing
 # -------
