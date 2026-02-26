@@ -1,1 +1,64 @@
-[]
+[
+  {
+    "dt": "Item",
+    "fieldname": "custom_ibox_id",
+    "fieldtype": "Data",
+    "label": "iBox ID",
+    "insert_after": "item_name",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Item-custom_ibox_id"
+  },
+  {
+    "dt": "Item",
+    "fieldname": "custom_ibox_client",
+    "fieldtype": "Link",
+    "label": "iBox Client",
+    "options": "iBox Client",
+    "insert_after": "custom_ibox_id",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Item-custom_ibox_client"
+  },
+  {
+    "dt": "Customer",
+    "fieldname": "custom_ibox_id",
+    "fieldtype": "Data",
+    "label": "iBox ID",
+    "insert_after": "customer_name",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Customer-custom_ibox_id"
+  },
+  {
+    "dt": "Customer",
+    "fieldname": "custom_ibox_client",
+    "fieldtype": "Link",
+    "label": "iBox Client",
+    "options": "iBox Client",
+    "insert_after": "custom_ibox_id",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Customer-custom_ibox_client"
+  },
+  {
+    "dt": "Customer",
+    "fieldname": "custom_main_phone",
+    "fieldtype": "Data",
+    "label": "Main Phone",
+    "insert_after": "custom_ibox_client",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Customer-custom_main_phone"
+  }
+]

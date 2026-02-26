@@ -2,24 +2,23 @@
 # For license information, please see license.txt
 
 """
-Sync module - handles synchronization between iBox and ERPNext
+Sync module — iBox va ERPNext o'rtasidagi sinxronizatsiya.
 """
 
 from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
-from erpnext_with_ibox.ibox.sync.orders import OrderSyncHandler
+from erpnext_with_ibox.ibox.sync.customers import CustomerSyncHandler
+from erpnext_with_ibox.ibox.sync.items import ItemSyncHandler
 from erpnext_with_ibox.ibox.sync.runner import sync_all_clients, sync_client
 
-# Registry of all sync handlers
 SYNC_HANDLERS = {
-    "orders": OrderSyncHandler,
-    # Future handlers:
-    # "payments": PaymentSyncHandler,
-    # "purchases": PurchaseSyncHandler,
+    "customers": CustomerSyncHandler,
+    "items": ItemSyncHandler,
 }
 
 __all__ = [
     "BaseSyncHandler",
-    "OrderSyncHandler", 
+    "CustomerSyncHandler",
+    "ItemSyncHandler",
     "SYNC_HANDLERS",
     "sync_all_clients",
     "sync_client",

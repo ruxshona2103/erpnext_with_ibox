@@ -7,7 +7,6 @@ iBox API Client - Base client for making HTTP requests to iBox API
 
 import requests
 import frappe
-from frappe import _
 
 
 class IBoxAPIClient:
@@ -19,8 +18,7 @@ class IBoxAPIClient:
         self.token = self.client_doc.get_password("bearer_token")
         self.filial_id = self.client_doc.filial_id or 1
         
-        # Lazy-loaded endpoint handlers
-        self._orders = None
+        self._directory = None
     
     def _get_headers(self) -> dict:
         return {
@@ -55,9 +53,9 @@ class IBoxAPIClient:
             raise
     
     @property
-    def orders(self):
-        """Lazy-load orders endpoint handler"""
-        if self._orders is None:
-            from erpnext_with_ibox.ibox.api.endpoints.orders import OrdersEndpoint
-            self._orders = OrdersEndpoint(self)
-        return self._orders
+    def directory(self):
+        """Directory endpoint handler (lazy-load)."""
+        if self._directory is None:
+            from erpnext_with_ibox.ibox.api.endpoints.directory import DirectoryEndpoint
+            self._directory = DirectoryEndpoint(self)
+        return self._directory

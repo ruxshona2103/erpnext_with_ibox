@@ -2,83 +2,87 @@
 # For license information, please see license.txt
 
 """
-Sync Runner - orchestrates sync operations for iBox clients
+Sync Runner — iBox clientlar uchun sync jarayonini boshqarish.
+Har bir client alohida background job sifatida ishga tushiriladi.
 """
 
 import frappe
 from frappe.utils import now
 
-from erpnext_with_ibox.ibox.api import IBoxAPIClient
+from erpnext_with_ibox.ibox.config import SYNC_QUEUE, SYNC_TIMEOUT
 
 
 def sync_all_clients():
     """
-    Sync all enabled iBox clients.
-    Called by scheduled job (daily at 23:00).
+    Barcha faol iBox Client lar uchun sync joblarni navbatga qo'yish.
+    hooks.py dagi scheduled job (har kuni Toshkent 23:50) orqali chaqiriladi.
+    Har bir client mustaqil background job sifatida ishlaydi.
     """
-    clients = frappe.get_all(
-        "iBox Client",
-        filters={"enabled": 1},
-        pluck="name"
-    )
-    
+    clients = frappe.get_all("iBox Client", filters={"enabled": 1}, pluck="name")
+
     for client_name in clients:
         try:
-            sync_client(client_name)
-        except Exception as e:
+            frappe.enqueue(
+                "erpnext_with_ibox.ibox.sync.runner.sync_client",
+                queue=SYNC_QUEUE,
+                timeout=SYNC_TIMEOUT,
+                job_id=f"ibox_sync_{client_name}",
+                client_name=client_name,
+            )
+        except Exception:
             frappe.log_error(
-                title=f"iBox Sync Error - {client_name}",
-                message=str(e)
+                title=f"Sync Enqueue Error - {client_name}",
+                message=frappe.get_traceback(),
             )
 
 
-def sync_client(client_name: str, handlers: list = None):
+def sync_client(client_name: str, handler_names: list = None):
     """
-    Sync a single iBox client.
-    
+    Bitta iBox Client uchun sync handlerlarni ishga tushirish.
+
     Args:
-        client_name: Name of iBox Client document
-        handlers: List of handler names to run (default: all)
+        client_name: iBox Client document nomi
+        handler_names: Ishga tushiriladigan handler kalitlari ro'yxati (default: hammasi)
     """
     from erpnext_with_ibox.ibox.sync import SYNC_HANDLERS
-    
+    from erpnext_with_ibox.ibox.api import IBoxAPIClient
+
     client_doc = frappe.get_doc("iBox Client", client_name)
     api = IBoxAPIClient(client_name)
-    
-    # Update status
-    client_doc.sync_status = "Syncing..."
-    client_doc.save(ignore_permissions=True)
+
+    if handler_names is None:
+        handler_names = list(SYNC_HANDLERS.keys())
+
+    all_results = {}
+
+    for handler_name in handler_names:
+        handler_class = SYNC_HANDLERS.get(handler_name)
+        if not handler_class:
+            continue
+
+        try:
+            handler = handler_class(api, client_doc)
+            result = handler.run()
+            all_results[handler_name] = result
+        except Exception:
+            frappe.log_error(
+                title=f"Sync Handler Error - {client_name}/{handler_name}",
+                message=frappe.get_traceback(),
+            )
+            all_results[handler_name] = {"error": True}
+
+    # Yakuniy natija
+    summary_parts = []
+    for name, res in all_results.items():
+        if isinstance(res, dict) and "synced" in res:
+            summary_parts.append(f"{name}: {res['synced']}/{res['processed']}")
+        else:
+            summary_parts.append(f"{name}: xatolik")
+
+    frappe.db.set_value("iBox Client", client_name, {
+        "sync_status": f"Tayyor: {', '.join(summary_parts)}",
+        "last_sync_datetime": now(),
+    }, update_modified=False)
     frappe.db.commit()
-    
-    try:
-        # Determine which handlers to run
-        if handlers is None:
-            handlers = list(SYNC_HANDLERS.keys())
-        
-        results = {}
-        
-        for handler_name in handlers:
-            handler_class = SYNC_HANDLERS.get(handler_name)
-            if handler_class:
-                handler = handler_class(api, client_doc)
-                count = handler.run()
-                results[handler_name] = count
-        
-        # Update success status
-        client_doc.reload()
-        client_doc.last_sync_datetime = now()
-        
-        # Format results
-        result_str = ", ".join(f"{k}: {v}" for k, v in results.items())
-        client_doc.sync_status = f"Success: {result_str}"
-        client_doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        
-        return results
-        
-    except Exception as e:
-        client_doc.reload()
-        client_doc.sync_status = f"Error: {str(e)[:100]}"
-        client_doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        raise
+
+    return all_results

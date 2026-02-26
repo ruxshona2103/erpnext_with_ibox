@@ -159,7 +159,7 @@ fixtures = [
 
 scheduler_events = {
 	"cron": {
-		"0 23 * * *": [
+		"50 18 * * *": [
 			"erpnext_with_ibox.ibox.sync.runner.sync_all_clients"
 		]
 	}

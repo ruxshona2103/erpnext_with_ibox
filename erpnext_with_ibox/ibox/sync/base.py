@@ -2,96 +2,101 @@
 # For license information, please see license.txt
 
 """
-Base Sync Handler - Abstract base class for all sync handlers
+Base Sync Handler — barcha sync handlerlar uchun abstract base class.
+Batch commit, progress tracking, error isolation — hammasi shu yerda.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Generator
+from typing import Generator
+
 import frappe
+
+from erpnext_with_ibox.ibox.config import BATCH_COMMIT_SIZE, PROGRESS_LOG_SIZE
 
 
 class BaseSyncHandler(ABC):
     """
-    Abstract base class for sync handlers.
-    
-    To add a new doctype sync:
-    1. Create new handler class extending BaseSyncHandler
-    2. Implement fetch_data(), sync_single(), get_existing_filter()
-    3. Register in SYNC_HANDLERS dict in __init__.py
+    Barcha sync handlerlar uchun abstract base class.
+
+    Yangi doctype sync qo'shish uchun:
+    1. BaseSyncHandler dan meros olgan class yarating
+    2. fetch_data() va upsert() ni implement qiling
+    3. SYNC_HANDLERS dict ga registratsiya qiling (sync/__init__.py)
     """
-    
-    # Override in subclass
-    DOCTYPE = None
-    NAME = None
-    
+
+    DOCTYPE: str = None   # Masalan: "Item", "Customer"
+    NAME: str = None      # Masalan: "Items", "Customers"
+
     def __init__(self, api_client, client_doc):
-        """
-        Initialize handler with API client and iBox Client doc
-        
-        Args:
-            api_client: IBoxAPIClient instance
-            client_doc: iBox Client document
-        """
         self.api = api_client
         self.client_doc = client_doc
-    
+        self.client_name = client_doc.name
+
     @abstractmethod
     def fetch_data(self) -> Generator[dict, None, None]:
-        """
-        Fetch data from iBox API. Should yield individual records.
-        
-        Yields:
-            dict: Single record data from iBox
-        """
-        pass
-    
+        """iBox API dan datalarni yield qilish."""
+        ...
+
     @abstractmethod
-    def sync_single(self, data: dict) -> bool:
+    def upsert(self, record: dict) -> bool:
         """
-        Sync a single record to ERPNext.
-        
-        Args:
-            data: Single record from iBox
-            
+        Bitta recordni ERPNext ga insert yoki update qilish.
+
         Returns:
-            True if synced, False if skipped (already exists)
+            True agar o'zgarish bo'lgan bo'lsa, False agar skip qilingan bo'lsa.
         """
-        pass
-    
-    @abstractmethod
-    def get_existing_filter(self, data: dict) -> dict:
+        ...
+
+    def run(self) -> dict:
         """
-        Get filter to check if record already exists in ERPNext.
-        
-        Args:
-            data: Single record from iBox
-            
+        To'liq sync jarayonini ishga tushirish.
+
         Returns:
-            dict filter for frappe.db.exists()
+            dict: {processed, synced, errors}
         """
-        pass
-    
-    def exists(self, data: dict) -> bool:
-        """Check if record already exists in ERPNext"""
-        return bool(frappe.db.exists(self.DOCTYPE, self.get_existing_filter(data)))
-    
-    def run(self) -> int:
-        """
-        Run the sync process.
-        
-        Returns:
-            Number of records synced
-        """
-        total_synced = 0
-        
+        processed = 0
+        synced = 0
+        errors = 0
+        batch_count = 0
+
+        self._set_status(f"{self.NAME} sync boshlandi...")
+
         for record in self.fetch_data():
             try:
-                if self.sync_single(record):
-                    total_synced += 1
-            except Exception as e:
+                if self.upsert(record):
+                    synced += 1
+                processed += 1
+                batch_count += 1
+
+                if batch_count >= BATCH_COMMIT_SIZE:
+                    frappe.db.commit()
+                    batch_count = 0
+
+                if processed % PROGRESS_LOG_SIZE == 0:
+                    self._set_status(
+                        f"{self.NAME}: {processed} ta qayta ishlandi, "
+                        f"{synced} ta sinxronlandi"
+                    )
+                    frappe.db.commit()
+
+            except Exception:
+                errors += 1
                 frappe.log_error(
-                    title=f"{self.NAME} Sync Error",
-                    message=f"Record: {record.get('id')}\nError: {str(e)}"
+                    title=f"{self.NAME} Upsert Error - {self.client_name}",
+                    message=f"record_id={record.get('id')}\n{frappe.get_traceback()}",
                 )
-        
-        return total_synced
+
+        frappe.db.commit()
+
+        return {"processed": processed, "synced": synced, "errors": errors}
+
+    def _set_status(self, status: str):
+        """iBox Client dagi sync_status maydonini yangilash."""
+        try:
+            frappe.db.set_value(
+                "iBox Client", self.client_name, "sync_status", status,
+                update_modified=False,
+            )
+            frappe.db.commit()
+        except Exception:
+            pass
