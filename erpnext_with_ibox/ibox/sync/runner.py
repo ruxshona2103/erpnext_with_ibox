@@ -53,6 +53,7 @@ def sync_client(client_name: str, handler_names: list = None):
     if handler_names is None:
         handler_names = list(SYNC_HANDLERS.keys())
 
+    internal_api = None
     all_results = {}
 
     for handler_name in handler_names:
@@ -61,7 +62,13 @@ def sync_client(client_name: str, handler_names: list = None):
             continue
 
         try:
-            handler = handler_class(api, client_doc)
+            if getattr(handler_class, "NEEDS_INTERNAL_API", False):
+                if internal_api is None:
+                    from erpnext_with_ibox.ibox.api.internal_client import IBoxInternalClient
+                    internal_api = IBoxInternalClient(client_name)
+                handler = handler_class(api, client_doc, internal_api=internal_api)
+            else:
+                handler = handler_class(api, client_doc)
             result = handler.run()
             all_results[handler_name] = result
         except Exception:

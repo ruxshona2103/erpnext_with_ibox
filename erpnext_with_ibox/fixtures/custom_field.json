@@ -60,5 +60,66 @@
     "module": "ibox",
     "doctype": "Custom Field",
     "name": "Customer-custom_main_phone"
+  },
+  {
+    "dt": "Supplier",
+    "fieldname": "custom_ibox_id",
+    "fieldtype": "Data",
+    "label": "iBox ID",
+    "insert_after": "supplier_name",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Supplier-custom_ibox_id"
+  },
+  {
+    "dt": "Supplier",
+    "fieldname": "custom_ibox_client",
+    "fieldtype": "Link",
+    "label": "iBox Client",
+    "options": "iBox Client",
+    "insert_after": "custom_ibox_id",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Supplier-custom_ibox_client"
+  },
+  {
+    "dt": "Supplier",
+    "fieldname": "custom_ibox_balances",
+    "fieldtype": "Data",
+    "label": "iBox Balances",
+    "insert_after": "custom_ibox_client",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Supplier-custom_ibox_balances"
+  },
+  {
+    "dt": "Supplier",
+    "fieldname": "custom_balance_uzs",
+    "fieldtype": "Currency",
+    "label": "Balance UZS",
+    "insert_after": "custom_ibox_balances",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Supplier-custom_balance_uzs"
+  },
+  {
+    "dt": "Supplier",
+    "fieldname": "custom_balance_usd",
+    "fieldtype": "Currency",
+    "label": "Balance USD",
+    "insert_after": "custom_balance_uzs",
+    "read_only": 1,
+    "no_copy": 1,
+    "module": "ibox",
+    "doctype": "Custom Field",
+    "name": "Supplier-custom_balance_usd"
   }
 ]

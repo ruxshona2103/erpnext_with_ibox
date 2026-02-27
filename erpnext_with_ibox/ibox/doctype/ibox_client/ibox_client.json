@@ -12,6 +12,10 @@
         "api_base_url",
         "bearer_token",
         "filial_id",
+        "section_break_internal_api",
+        "internal_api_login",
+        "column_break_internal_api",
+        "internal_api_password",
         "section_break_erp",
         "company",
         "column_break_sync",
@@ -58,6 +62,25 @@
             "label": "Filial ID"
         },
         {
+            "fieldname": "section_break_internal_api",
+            "fieldtype": "Section Break",
+            "label": "Internal API Settings"
+        },
+        {
+            "fieldname": "internal_api_login",
+            "fieldtype": "Data",
+            "label": "Internal API Login"
+        },
+        {
+            "fieldname": "column_break_internal_api",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "internal_api_password",
+            "fieldtype": "Password",
+            "label": "Internal API Password"
+        },
+        {
             "fieldname": "section_break_erp",
             "fieldtype": "Section Break",
             "label": "ERPNext Settings"
@@ -88,7 +111,7 @@
     ],
     "index_web_pages_for_search": 1,
     "links": [],
-    "modified": "2026-02-06 16:10:00.000000",
+    "modified": "2026-02-27 12:00:00.000000",
     "modified_by": "Administrator",
     "module": "ibox",
     "name": "iBox Client",
