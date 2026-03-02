@@ -19,6 +19,8 @@ class IBoxAPIClient:
         self.filial_id = self.client_doc.filial_id or 1
         
         self._directory = None
+        self._warehouses = None
+        self._purchases = None
     
     def _get_headers(self) -> dict:
         return {
@@ -59,3 +61,19 @@ class IBoxAPIClient:
             from erpnext_with_ibox.ibox.api.endpoints.directory import DirectoryEndpoint
             self._directory = DirectoryEndpoint(self)
         return self._directory
+
+    @property
+    def warehouses(self):
+        """Warehouse endpoint handler (lazy-load)."""
+        if self._warehouses is None:
+            from erpnext_with_ibox.ibox.api.endpoints.warehouses import WarehouseEndpoint
+            self._warehouses = WarehouseEndpoint(self)
+        return self._warehouses
+
+    @property
+    def purchases(self):
+        """Purchase endpoint handler (lazy-load)."""
+        if self._purchases is None:
+            from erpnext_with_ibox.ibox.api.endpoints.purchases import PurchaseEndpoint
+            self._purchases = PurchaseEndpoint(self)
+        return self._purchases
