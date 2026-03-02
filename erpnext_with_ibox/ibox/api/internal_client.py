@@ -28,7 +28,26 @@ class IBoxInternalClient:
         self._login = self.client_doc.internal_api_login
         self._password = self.client_doc.get_password("internal_api_password")
 
+        # ── Credential Validation ─────────────────────────────────────
+        if not self._login or not self._password:
+            frappe.log_error(
+                title=f"iBox Internal Login Failed for Client {self.client_name}",
+                message=(
+                    "Internal API login yoki password bo'sh.\n"
+                    f"Client: {self.client_name}\n"
+                    "iBox Client sozlamalarida 'Internal API Login' va "
+                    "'Internal API Password' maydonlarini to'ldiring."
+                ),
+            )
+            frappe.throw(
+                f"iBox Internal API uchun login/password bo'sh — "
+                f"Client: {self.client_name}. "
+                f"Iltimos, iBox Client sozlamalarini tekshiring.",
+                title="Internal API Credentials Missing",
+            )
+
         self._supplier = None
+        self._exchange_rate = None
 
     @property
     def _cache_key(self) -> str:
@@ -79,8 +98,8 @@ class IBoxInternalClient:
 
         except requests.exceptions.RequestException as e:
             frappe.log_error(
-                title=f"iBox Internal Login Error - {self.client_name}",
-                message=f"URL: {url}\nError: {str(e)}",
+                title=f"iBox Internal Login Failed for Client {self.client_name}",
+                message=f"URL: {url}\nLogin: {self._login}\nError: {str(e)}",
             )
             raise
 
@@ -145,3 +164,36 @@ class IBoxInternalClient:
             from erpnext_with_ibox.ibox.api.endpoints.supplier import SupplierEndpoint
             self._supplier = SupplierEndpoint(self)
         return self._supplier
+
+    @property
+    def exchange_rate(self):
+        """Exchange Rate endpoint handler (lazy-load)."""
+        if self._exchange_rate is None:
+            from erpnext_with_ibox.ibox.api.endpoints.exchange_rate import ExchangeRateEndpoint
+            self._exchange_rate = ExchangeRateEndpoint(self)
+        return self._exchange_rate
+
+
+# ── Convenience Function ──────────────────────────────────────────────────────
+
+def get_internal_session_token(client_doc) -> str:
+    """
+    Tashqi modullar uchun qulay funksiya — iBox Internal API token olish.
+
+    Args:
+        client_doc: iBox Client document (yoki document nomi - str)
+
+    Returns:
+        str: Bearer token
+
+    Usage:
+        from erpnext_with_ibox.ibox.api.internal_client import get_internal_session_token
+        token = get_internal_session_token("My iBox Client")
+    """
+    if isinstance(client_doc, str):
+        client_name = client_doc
+    else:
+        client_name = client_doc.name
+
+    internal_client = IBoxInternalClient(client_name)
+    return internal_client._get_token()
