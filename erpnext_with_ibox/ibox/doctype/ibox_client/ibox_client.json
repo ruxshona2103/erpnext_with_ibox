@@ -2,7 +2,7 @@
     "actions": [],
     "allow_rename": 1,
     "autoname": "field:client_name",
-    "creation": "2026-02-06 16:10:00.000000",
+    "creation": "2026-02-06 16:10:00",
     "doctype": "DocType",
     "engine": "InnoDB",
     "field_order": [
@@ -18,9 +18,13 @@
         "internal_api_password",
         "section_break_erp",
         "company",
+        "default_warehouse",
         "column_break_sync",
         "last_sync_datetime",
-        "sync_status"
+        "sync_status",
+        "currency_section",
+        "uzs_payable_account",
+        "usd_payable_account"
     ],
     "fields": [
         {
@@ -93,6 +97,13 @@
             "reqd": 1
         },
         {
+            "fieldname": "default_warehouse",
+            "fieldtype": "Link",
+            "label": "Default Warehouse (Fallback)",
+            "options": "Warehouse",
+            "description": "Xarid API da warehouse_id bo'lmasa, ushbu ombor ishlatiladi."
+        },
+        {
             "fieldname": "column_break_sync",
             "fieldtype": "Column Break"
         },
@@ -107,11 +118,28 @@
             "fieldtype": "Data",
             "label": "Sync Status",
             "read_only": 1
+        },
+        {
+            "fieldname": "currency_section",
+            "fieldtype": "Section Break",
+            "label": "Currency "
+        },
+        {
+            "fieldname": "uzs_payable_account",
+            "fieldtype": "Link",
+            "label": "UZS Payable Account",
+            "options": "Account"
+        },
+        {
+            "fieldname": "usd_payable_account",
+            "fieldtype": "Link",
+            "label": "USD Payable Account",
+            "options": "Account"
         }
     ],
     "index_web_pages_for_search": 1,
     "links": [],
-    "modified": "2026-02-27 12:00:00.000000",
+    "modified": "2026-02-27 18:09:51.522132",
     "modified_by": "Administrator",
     "module": "ibox",
     "name": "iBox Client",
@@ -131,6 +159,7 @@
             "write": 1
         }
     ],
+    "row_format": "Dynamic",
     "sort_field": "creation",
     "sort_order": "DESC",
     "states": [],

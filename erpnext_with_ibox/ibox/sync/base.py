@@ -62,6 +62,15 @@ class BaseSyncHandler(ABC):
         self._set_status(f"{self.NAME} sync boshlandi...")
 
         for record in self.fetch_data():
+            # Stop flag tekshirish
+            if self._is_stopped():
+                self._set_status(
+                    f"{self.NAME}: TO'XTATILDI ⛔ "
+                    f"({processed} ta qayta ishlandi, {synced} ta sinxronlandi)"
+                )
+                frappe.db.commit()
+                return {"processed": processed, "synced": synced, "errors": errors, "stopped": True}
+
             try:
                 if self.upsert(record):
                     synced += 1
@@ -89,6 +98,10 @@ class BaseSyncHandler(ABC):
         frappe.db.commit()
 
         return {"processed": processed, "synced": synced, "errors": errors}
+
+    def _is_stopped(self) -> bool:
+        """Cache'dagi stop flagni tekshirish."""
+        return bool(frappe.cache().get_value(f"ibox_sync_stop_{self.client_name}"))
 
     def _set_status(self, status: str):
         """iBox Client dagi sync_status maydonini yangilash."""

@@ -24,7 +24,19 @@ class ItemSyncHandler(BaseSyncHandler):
     def upsert(self, record: dict) -> bool:
         ibox_id = record.get("id")
         item_name = self._clean(record.get("name"), "Noma'lum mahsulot")
-        item_code = self._sanitize(item_name)[:140] or f"IBOX-{ibox_id}"
+        base_code = self._sanitize(item_name)[:130] or f"IBOX-{ibox_id}"
+        item_code = base_code
+
+        # Duplicate item_code tekshirish — boshqa ibox_id li item mavjudmi?
+        dup = frappe.db.get_value(
+            "Item",
+            {"name": item_code},
+            ["name", "custom_ibox_id"],
+            as_dict=True,
+        )
+        if dup and str(dup.custom_ibox_id) != str(ibox_id):
+            # Boshqa product bir xil nomda — suffix qo'shamiz
+            item_code = f"{base_code}-{ibox_id}"
 
         item_group = (
             "Products"
@@ -48,7 +60,7 @@ class ItemSyncHandler(BaseSyncHandler):
                 changed = True
             return changed
 
-        frappe.get_doc({
+        doc = frappe.get_doc({
             "doctype": "Item",
             "item_code": item_code,
             "item_name": item_name,
@@ -59,7 +71,9 @@ class ItemSyncHandler(BaseSyncHandler):
             "is_purchase_item": 1,
             "custom_ibox_id": ibox_id,
             "custom_ibox_client": self.client_name,
-        }).insert(ignore_permissions=True)
+        })
+        doc.flags.ignore_validate = True
+        doc.insert(ignore_permissions=True)
         return True
 
     @staticmethod

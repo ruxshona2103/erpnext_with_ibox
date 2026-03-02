@@ -3,26 +3,68 @@
 
 """
 Sync module — iBox va ERPNext o'rtasidagi sinxronizatsiya.
+
+MASTER_SYNC_ORDER — asosiy ma'lumotlar sinxronizatsiyasining to'g'ri ketma-ketligi:
+  1. warehouses  — omborlar (stok uchun asos)
+  2. suppliers   — taminotchilar (xarid uchun asos)
+  3. customers   — mijozlar (sotuv uchun asos)
+  4. items       — mahsulotlar (tranzaksiyalar uchun asos)
+Purchases alohida (faqat master data to'liq bo'lgandan keyin ishga tushiriladi).
 """
 
 from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 from erpnext_with_ibox.ibox.sync.customers import CustomerSyncHandler
+from erpnext_with_ibox.ibox.sync.exchange_rates import ExchangeRateSyncHandler
 from erpnext_with_ibox.ibox.sync.items import ItemSyncHandler
 from erpnext_with_ibox.ibox.sync.suppliers import SupplierSyncHandler
+from erpnext_with_ibox.ibox.sync.warehouses import WarehouseSyncHandler
+from erpnext_with_ibox.ibox.sync.purchases import PurchaseSyncHandler
 from erpnext_with_ibox.ibox.sync.runner import sync_all_clients, sync_client
 
+
+class PurchasesOnlyHandler(PurchaseSyncHandler):
+    """Faqat xaridlarni yuklaydi (vozvratlar yuklanmaydi)."""
+    NAME = "Purchases (Xaridlar)"
+    def fetch_data(self):
+        yield from self.api.purchases.get_all_purchases()
+
+
+class ReturnsOnlyHandler(PurchaseSyncHandler):
+    """Faqat vozvratlarni yuklaydi (xaridlar yuklanmaydi)."""
+    NAME = "Returns (Vozvratlar)"
+    def fetch_data(self):
+        yield from self.api.purchases.get_all_returns()
+
+
+# Handler registry — barcha mavjud handlerlar
 SYNC_HANDLERS = {
-    "customers": CustomerSyncHandler,
-    "items": ItemSyncHandler,
-    "suppliers": SupplierSyncHandler,
+    "warehouses":       WarehouseSyncHandler,
+    "suppliers":        SupplierSyncHandler,
+    "customers":        CustomerSyncHandler,
+    "items":            ItemSyncHandler,
+    "purchases":        PurchaseSyncHandler,        # xarid + vozvrat (ikkalasi)
+    "purchases_only":   PurchasesOnlyHandler,       # faqat xarid
+    "returns_only":     ReturnsOnlyHandler,          # faqat vozvrat
+    "exchange_rates":   ExchangeRateSyncHandler,     # valyuta kurslari
 }
+
+# Master sync ketma-ketligi — "Sync Now" uchun majburiy tartib.
+# Purchases FAQAT master data (warehouses, suppliers, customers, items)
+# to'liq importdan keyin triggerlanadi.
+MASTER_SYNC_ORDER = ["warehouses", "suppliers", "customers", "items"]
 
 __all__ = [
     "BaseSyncHandler",
     "CustomerSyncHandler",
+    "ExchangeRateSyncHandler",
     "ItemSyncHandler",
     "SupplierSyncHandler",
+    "WarehouseSyncHandler",
+    "PurchaseSyncHandler",
+    "PurchasesOnlyHandler",
+    "ReturnsOnlyHandler",
     "SYNC_HANDLERS",
+    "MASTER_SYNC_ORDER",
     "sync_all_clients",
     "sync_client",
 ]
