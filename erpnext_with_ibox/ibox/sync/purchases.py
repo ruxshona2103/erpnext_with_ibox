@@ -215,11 +215,23 @@ class PurchaseSyncHandler(BaseSyncHandler):
             if is_return:
                 qty = -qty
 
+            final_qty = qty if qty != 0 else (-1 if is_return else 1)
+
+            # ── UOM — Item dan stock_uom olish ───────────────────────
+            uom = self._resolve_uom(item_code)
+
             items.append({
                 "item_code": item_code,
                 "warehouse": row_wh_name,
-                "qty": qty if qty != 0 else (-1 if is_return else 1),
-                "rate": 0.0,
+                "qty": final_qty,
+                "rate": 1,
+                "amount": final_qty * 1,
+                "base_rate": 1 * conversion_rate,
+                "base_amount": final_qty * 1 * conversion_rate,
+                "uom": uom,
+                "stock_uom": uom,
+                "stock_qty": final_qty,
+                "conversion_factor": 1,
                 "custom_ibox_detail_id": detail.get("id"),
                 "custom_ibox_warehouse_id": row_wh_id,
             })
@@ -304,6 +316,13 @@ class PurchaseSyncHandler(BaseSyncHandler):
             {"custom_ibox_id": product_id, "custom_ibox_client": self.client_name},
             "name",
         )
+
+    def _resolve_uom(self, item_code: str) -> str:
+        """Item.stock_uom ni olish. Topilmasa 'Nos' (ERPNext default)."""
+        if not item_code:
+            return "Nos"
+        uom = frappe.db.get_value("Item", item_code, "stock_uom")
+        return uom or "Nos"
 
     def _resolve_currency_account(self, currency_code: str) -> tuple:
         """
