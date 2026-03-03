@@ -97,6 +97,10 @@ fixtures = [
     {
         "dt": "Custom Field",
         "filters": [["module", "=", "ibox"]]
+    },
+    {
+        "dt": "Property Setter",
+        "filters": [["module", "=", "ibox"]]
     }
 ]
 
