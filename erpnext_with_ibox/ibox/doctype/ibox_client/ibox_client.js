@@ -127,6 +127,23 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
+            // ── To'lovlarni Yuklash (faqat to'lovlar) ────────────────────
+            frm.add_custom_button(__("To'lovlarni Yuklash"), function () {
+                frappe.call({
+                    method: "sync_payments",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("To'lovlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                    }
+                });
+            }, __("Actions"));
+
             // ── Vozvratlarni Yuklash (faqat vozvrat, xarid emas) ─────
             frm.add_custom_button(__("Vozvratlarni Yuklash"), function () {
                 frappe.call({

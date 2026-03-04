@@ -32,3 +32,6 @@ PROGRESS_LOG_SIZE = 1000   # sync_status yangilash oralig'i
 # -- Background Job Defaults --
 SYNC_QUEUE = "long"
 SYNC_TIMEOUT = 7200        # 2 soat har bir job uchun
+
+# -- Payment Sync --
+SLUG_PAYMENTS = "/api/integration/document/payment-received/list"

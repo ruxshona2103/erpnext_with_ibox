@@ -24,7 +24,9 @@
         "sync_status",
         "currency_section",
         "uzs_payable_account",
-        "usd_payable_account"
+        "usd_payable_account",
+        "cashboxes_section",
+        "cashboxes"
     ],
     "fields": [
         {
@@ -135,6 +137,17 @@
             "fieldtype": "Link",
             "label": "USD Payable Account",
             "options": "Account"
+        },
+        {
+            "fieldname": "cashboxes_section",
+            "fieldtype": "Section Break",
+            "label": "Cashbox Mapping"
+        },
+        {
+            "fieldname": "cashboxes",
+            "fieldtype": "Table",
+            "label": "Cashboxes",
+            "options": "iBox Cashbox Mapping"
         }
     ],
     "index_web_pages_for_search": 1,

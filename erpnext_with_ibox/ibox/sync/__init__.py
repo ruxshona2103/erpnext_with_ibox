@@ -19,6 +19,7 @@ from erpnext_with_ibox.ibox.sync.items import ItemSyncHandler
 from erpnext_with_ibox.ibox.sync.suppliers import SupplierSyncHandler
 from erpnext_with_ibox.ibox.sync.warehouses import WarehouseSyncHandler
 from erpnext_with_ibox.ibox.sync.purchases import PurchaseSyncHandler
+from erpnext_with_ibox.ibox.sync.payments import PaymentSyncHandler
 from erpnext_with_ibox.ibox.sync.runner import sync_all_clients, sync_client
 
 
@@ -46,6 +47,7 @@ SYNC_HANDLERS = {
     "purchases_only":   PurchasesOnlyHandler,       # faqat xarid
     "returns_only":     ReturnsOnlyHandler,          # faqat vozvrat
     "exchange_rates":   ExchangeRateSyncHandler,     # valyuta kurslari
+    "payments":         PaymentSyncHandler,          # to'lovlar
 }
 
 # Master sync ketma-ketligi — "Sync Now" uchun majburiy tartib.
