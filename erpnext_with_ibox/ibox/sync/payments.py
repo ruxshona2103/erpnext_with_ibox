@@ -1,23 +1,21 @@
-# Copyright (c) 2026, asadbek.backend@gmail.com and contributors
-# For license information, please see license.txt
 
-"""
-Payment Received Sync Handler — iBox payment-received/list -> ERPNext Payment Entry.
-"""
 
+import time
 from typing import Generator
+
 import frappe
-from frappe.utils import getdate
+from frappe.utils import flt
 
 from erpnext_with_ibox.ibox.config import SLUG_PAYMENTS
 from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
+
 
 class PaymentSyncHandler(BaseSyncHandler):
     DOCTYPE = "Payment Entry"
     NAME = "Payments"
 
     def fetch_data(self) -> Generator[dict, None, None]:
-        # To'lovlar API si pagination bilan ishlaydi
+        """iBox API dan barcha to'lovlarni sahifa-sahifa yield qilish."""
         page = 1
         per_page = 100
         total_pages = None
@@ -29,7 +27,7 @@ class PaymentSyncHandler(BaseSyncHandler):
                 params={"page": page, "per_page": per_page}
             )
             records = response.get("data", [])
-            
+
             if total_pages is None:
                 total_pages = response.get("last_page", 1)
 
@@ -43,102 +41,210 @@ class PaymentSyncHandler(BaseSyncHandler):
                 break
 
             page += 1
+            time.sleep(1)  # Rate limit — 429 xatosidan saqlash
 
     def upsert(self, record: dict) -> bool:
-        # Faqat "Оплата от клиента" (payment_type == 1) bo'lganlarni kiritamiz
-        payment_type = record.get("payment_type")
-        if payment_type != 1:
-            return False  # Ignore qolganlarini
+        """
+        Bitta iBox to'lov recordini ERPNext Payment Entry ga aylantiradi.
+        Faqat payment_type=1 ("Оплата от клиента") qayta ishlanadi.
+
+        Returns:
+            True — kamida 1 ta Payment Entry yaratilsa.
+            False — zapis o'tkazib yuborilsa.
+        """
+        # Faqat "Оплата от клиента" (payment_type == 1)
+        if record.get("payment_type") != 1:
+            return False
 
         ibox_payment_id = str(record.get("id"))
         outlet_id = record.get("outlet_id")
-        posting_date = (record.get("date") or "").split("T")[0]
+        posting_date = (record.get("date") or "").split("T")[0] or frappe.utils.today()
 
-        # Customer topamiz
+        # Customer topamiz (outlet_id → Customer)
         customer = frappe.db.get_value(
             "Customer",
-            {
-                "custom_ibox_id": outlet_id,
-                "custom_ibox_client": self.client_name
-            },
+            {"custom_ibox_id": outlet_id, "custom_ibox_client": self.client_name},
             "name"
         )
         if not customer:
-            frappe.logger().warning(f"Customer topilmadi: outlet_id={outlet_id} payment={ibox_payment_id}. O'tkazib yuborildi.")
+            return False  # Mijoz sync qilinmagan — o'tkazib yuboramiz
+
+        # Kompaniya default valyutasi
+        company = self.client_doc.company
+        company_currency = frappe.db.get_value(
+            "Company", company, "default_currency"
+        ) or "USD"
+
+        # paid_from — mijozning Receivable (Debitor) accounti
+        # Payment Entry type=Receive uchun MAJBURIY maydon
+        paid_from = self._get_receivable_account()
+        if not paid_from:
+            frappe.log_error(
+                title=f"Payments Config Error - {self.client_name}",
+                message=(
+                    f"payment_id={ibox_payment_id}: Kompaniya '{company}' uchun "
+                    f"Receivable account topilmadi. "
+                    f"ERPNext → Chart of Accounts dan account_type='Receivable' mavjudligini tekshiring."
+                )
+            )
             return False
 
         changed = False
-        payment_details = record.get("payment_details", [])
 
-        for detail in payment_details:
+        for detail in record.get("payment_details", []):
             detail_id = str(detail.get("id"))
-            amount = detail.get("amount", 0)
-            cashbox_info = detail.get("cashbox", {})
-            currency_info = detail.get("currency", {})
-            
+            amount = flt(detail.get("amount", 0))
             cashbox_id = str(detail.get("cashbox_id"))
-            
-            # Mapping orqali ERPNext Mode of Payment ni topamiz
+            payment_currency = (detail.get("currency") or {}).get("code") or company_currency
+
+            # Mode of Payment — cashbox mapping dan
             mode_of_payment = self._get_mode_of_payment(cashbox_id)
             if not mode_of_payment:
-                frappe.logger().warning(f"Cashbox mapping topilmadi: cashbox_id={cashbox_id} ibox_client={self.client_name}. To'lov ID={ibox_payment_id}. O'tkazib yuborildi.")
+                # Cashbox mapping yo'q — bu detail ni o'tkazib yuboramiz
                 continue
 
-            # Deduplication
-            existing = frappe.db.get_value(
+            # Deduplication — bir xil detail qayta kiritilmasin
+            if frappe.db.get_value(
                 "Payment Entry",
                 {"custom_ibox_payment_detail_id": detail_id},
                 "name"
-            )
-
-            if existing:
-                # Odatda to'lovlar o'zgarmaydi. Lekin xohlasak bu yerda update yozish mumkin.
+            ):
                 continue
 
-            # Target currency (USD/UZS) dan qat'iy nazar ERPNext o'zi hal qilishi uchun 
-            # asosan Amount va Customer beriladi.
-            # Target currency (USD/UZS) dan qat'iy nazar ERPNext o'zi hal qilishi uchun 
-            # asosan Amount va Customer beriladi.
-            doc = frappe.get_doc({
-                "doctype": "Payment Entry",
-                "payment_type": "Receive",
-                "party_type": "Customer",
-                "party": customer,
-                "paid_amount": amount,
-                "received_amount": amount,
-                "mode_of_payment": mode_of_payment,
-                "company": self.client_doc.company,
-                "posting_date": posting_date or frappe.utils.today(),
-                "custom_ibox_client": self.client_name,
-                "custom_ibox_payment_id": ibox_payment_id,
-                "custom_ibox_payment_detail_id": detail_id,
-            })
-            
-            # Accountlarni Mode of Payment dan oladi, Default setup bo'lmasa xato beradi
+            # paid_to — Mode of Payment dan topamiz
+            paid_to = self._get_paid_to_account(mode_of_payment, company_currency)
+            if not paid_to:
+                frappe.log_error(
+                    title=f"Payments Config Error - {self.client_name}",
+                    message=(
+                        f"payment_id={ibox_payment_id} detail_id={detail_id}: "
+                        f"Mode of Payment '{mode_of_payment}' uchun account topilmadi. "
+                        f"ERPNext → Mode of Payment → Accounts jadvalini to'ldiring."
+                    )
+                )
+                continue
+
+            # Exchange rate hisoblash
+            if payment_currency == company_currency:
+                exchange_rate = 1.0
+            else:
+                exchange_rate = flt(
+                    frappe.db.get_value(
+                        "Currency Exchange",
+                        {"from_currency": payment_currency, "to_currency": company_currency},
+                        "exchange_rate"
+                    )
+                ) or 1.0
+
+            # paid_amount  = mijoz valyutasidagi summa (iBox dan keladi)
+            # received_amount = kompaniya valyutasidagi summa (konvertatsiyadan keyin)
+            paid_amount = flt(amount, 2)
+            received_amount = flt(amount * exchange_rate, 2)
+
             try:
+                doc = frappe.get_doc({
+                    "doctype": "Payment Entry",
+                    "payment_type": "Receive",
+                    "party_type": "Customer",
+                    "party": customer,
+                    "company": company,
+                    "posting_date": posting_date,
+                    "mode_of_payment": mode_of_payment,
+                    # Hisob raqamlar
+                    "paid_from": paid_from,               # Receivable (Debitor) — MAJBURIY
+                    "paid_to": paid_to,                   # Cash/Bank
+                    # Valyutalar
+                    "paid_from_account_currency": payment_currency,
+                    "paid_to_account_currency": company_currency,
+                    # Miqdorlar
+                    "paid_amount": paid_amount,
+                    "received_amount": received_amount,
+                    # Exchange rates
+                    "source_exchange_rate": exchange_rate,
+                    "target_exchange_rate": 1.0,
+                    # iBox meta
+                    "custom_ibox_client": self.client_name,
+                    "custom_ibox_payment_id": ibox_payment_id,
+                    "custom_ibox_payment_detail_id": detail_id,
+                })
                 doc.setup_party_account_field()
                 doc.set_missing_values()
                 doc.insert(ignore_permissions=True)
-                # doc.submit() # Avtomatik submit qilish kerak bo'lsa yoqamiz.
                 changed = True
-            except frappe.exceptions.ValidationError as e:
+            except Exception:
                 frappe.log_error(
                     title=f"Payments Upsert Error - {self.client_name}",
-                    message=f"Validation: {ibox_payment_id} detail={detail_id}\n{frappe.get_traceback()}"
-                )
-            except Exception as e:
-                frappe.log_error(
-                    title=f"Payments Upsert Error - {self.client_name}",
-                    message=f"System: {ibox_payment_id} detail={detail_id}\n{frappe.get_traceback()}"
+                    message=(
+                        f"payment_id={ibox_payment_id} "
+                        f"detail_id={detail_id}\n"
+                        f"{frappe.get_traceback()}"
+                    )
                 )
 
         return changed
 
     def _get_mode_of_payment(self, cashbox_id: str) -> str:
-        # iBox Client dagi iBox Cashbox Mapping jadvalidan qidirish
-        # iBox Cashbox Mapping nomi bilan Child Table `cashboxes` qilib ulangan.
-        client_doc = frappe.get_doc("iBox Client", self.client_name)
-        for row in client_doc.get("cashboxes", []):
+        """iBox Client dagi Cashbox Mapping jadvalidan Mode of Payment topish."""
+        for row in self.client_doc.get("cashboxes", []):
             if str(row.cashbox_id) == str(cashbox_id):
                 return row.mode_of_payment
         return None
+
+    def _get_receivable_account(self) -> str:
+        """
+        Kompaniyaning Receivable (Debitor) accountini topish.
+        Payment Entry type=Receive uchun paid_from field ga kerak.
+        """
+        company = self.client_doc.company
+
+        # 1. Company default receivable account
+        receivable = frappe.db.get_value(
+            "Company", company, "default_receivable_account"
+        )
+        if receivable:
+            return receivable
+
+        # 2. Chart of Accounts dan account_type=Receivable qidirish
+        receivable = frappe.db.get_value(
+            "Account",
+            {"company": company, "account_type": "Receivable", "is_group": 0},
+            "name"
+        )
+        return receivable or ""
+
+    def _get_paid_to_account(self, mode_of_payment: str, currency: str) -> str:
+        """
+        paid_to accountni topish:
+        1. Mode of Payment > Accounts jadvalidan (company bo'yicha)
+        2. Fallback: kompaniyaning default Cash accounti
+        """
+        company = self.client_doc.company
+
+        # 1. Mode of Payment dan account topamiz
+        mop_account = frappe.db.get_value(
+            "Mode of Payment Account",
+            {"parent": mode_of_payment, "company": company},
+            "default_account"
+        )
+        if mop_account:
+            return mop_account
+
+        # 2. Fallback: kompaniyaning Cash accountini topamiz
+        cash_account = frappe.db.get_value(
+            "Account",
+            {
+                "company": company,
+                "account_type": "Cash",
+                "is_group": 0,
+            },
+            "name"
+        )
+        if cash_account:
+            return cash_account
+
+        # 3. Oxirgi fallback: ism bo'yicha qidirish
+        return frappe.db.get_value(
+            "Account",
+            {"company": company, "account_name": "Cash", "is_group": 0},
+            "name"
+        ) or ""

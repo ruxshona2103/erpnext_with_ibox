@@ -76,10 +76,13 @@ def sync_client(client_name: str, handler_names: list = None):
     internal_api = None
     all_results = {}
 
-    # Stop flagni tozalash — yangi sync boshlanayotganda eski stop flag to'sqinlik qilmasligi uchun
-    frappe.cache().delete_value(f"ibox_sync_stop_{client_name}")
-
-    _set_status(client_name, "To'liq sinxronizatsiya boshlandi...")
+    # Stop flagni faqat yangi TO'LIQ sync boshlanishida tozalaymiz.
+    # Partial sync larda tozalamaymiz — foydalanuvchi to'xtatish bosgan bo'lishi mumkin.
+    if handler_names is None:
+        frappe.cache().delete_value(f"ibox_sync_stop_{client_name}")
+        _set_status(client_name, "To'liq sinxronizatsiya boshlandi...")
+    else:
+        _set_status(client_name, f"Qisman sinxronizatsiya boshlandi: {', '.join(handler_names)}...")
 
     for handler_name in handler_names:
         handler_class = SYNC_HANDLERS.get(handler_name)
