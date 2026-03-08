@@ -180,6 +180,26 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
+            // ── Kassalarni Yuklash ───────────────────────────────────
+            frm.add_custom_button(__("Kassalarni Yuklash"), function () {
+                frappe.call({
+                    method: "sync_cashboxes",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Kassalar (Cashboxes) yuklanmoqda..."),
+                    callback: function (r) {
+                        if (!r.exc) {
+                            frappe.msgprint({
+                                title: __("Sinxronizatsiya Yakunlandi"),
+                                indicator: "green",
+                                message: r.message.message || __("Kassalar muvaffaqiyatli yuklandi.")
+                            });
+                            frm.reload_doc();
+                        }
+                    }
+                });
+            }, __("Actions"));
+
             // ── Sinxronizatsiyani To'xtatish ─────────────────────────
             frm.add_custom_button(__("Sinxronizatsiyani To'xtatish"), function () {
                 frappe.confirm(

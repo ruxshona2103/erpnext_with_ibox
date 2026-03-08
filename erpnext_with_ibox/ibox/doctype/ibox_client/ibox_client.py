@@ -161,6 +161,49 @@ class iBoxClient(Document):
         )
         return {"message": "Valyuta kurslari sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
 
+    @frappe.whitelist()
+    def sync_cashboxes(self):
+        """Kassalarni iBox API dan tortib, child table ga yozish."""
+        from erpnext_with_ibox.ibox.api.internal_client import IBoxInternalClient
+        
+        try:
+            client = IBoxInternalClient(self.name)
+            cashboxes_data = client.cashbox.get_all(active=True)
+            
+            # Mavjud cashbox_id larni topish (mapping doc orqali row ni izlash)
+            existing_cashboxes = {row.cashbox_id: row for row in self.get("cashboxes")}
+            
+            added = 0
+            updated = 0
+            
+            for cb in cashboxes_data:
+                cb_id = str(cb.get("id"))
+                cb_name = cb.get("name")
+                
+                if cb_id in existing_cashboxes:
+                    row = existing_cashboxes[cb_id]
+                    if row.cashbox_name != cb_name:
+                        row.cashbox_name = cb_name
+                        updated += 1
+                else:
+                    self.append("cashboxes", {
+                        "cashbox_id": cb_id,
+                        "cashbox_name": cb_name
+                    })
+                    added += 1
+            
+            if added > 0 or updated > 0:
+                self.save(ignore_permissions=True)
+                frappe.db.commit()
+                
+            return {
+                "message": f"Kassalar muvaffaqiyatli yuklandi!\\nYangi: {added} ta\\nYangilandi: {updated} ta\\nJami: {len(cashboxes_data)} ta"
+            }
+            
+        except Exception as e:
+            frappe.log_error(title=f"Cashbox Sync Error - {self.name}", message=str(e))
+            frappe.throw(f"Kassalarni tortishda xatolik yuz berdi: {str(e)[:200]}")
+
     # ── Stop Sync ─────────────────────────────────────────────────
 
     @frappe.whitelist()

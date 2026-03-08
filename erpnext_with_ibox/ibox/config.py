@@ -19,6 +19,7 @@ PURCHASE_PAGE_SIZE = 100   # Xarid/vozvrat sahifada yozuvlar soni
 SUPPLIER_ENDPOINT = "/api/outlet/supplier"
 LOGIN_ENDPOINT = "/api/user/login"
 EXCHANGE_RATE_ENDPOINT = "/api/core/exchange-rate"
+CASHBOX_ENDPOINT = "/api/finance/cashbox"
 
 # -- Internal API Token --
 INTERNAL_TOKEN_TTL = 18000  # 5 soat (sekundlarda)

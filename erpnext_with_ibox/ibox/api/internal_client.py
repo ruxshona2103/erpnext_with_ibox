@@ -173,7 +173,13 @@ class IBoxInternalClient:
             self._exchange_rate = ExchangeRateEndpoint(self)
         return self._exchange_rate
 
-
+    @property
+    def cashbox(self):
+        """Cashbox endpoint handler (lazy-load)."""
+        if not hasattr(self, '_cashbox') or self._cashbox is None:
+            from erpnext_with_ibox.ibox.api.endpoints.cashbox import CashboxEndpoint
+            self._cashbox = CashboxEndpoint(self)
+        return self._cashbox
 # ── Convenience Function ──────────────────────────────────────────────────────
 
 def get_internal_session_token(client_doc) -> str:
