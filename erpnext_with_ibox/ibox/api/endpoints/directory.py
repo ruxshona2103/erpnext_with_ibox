@@ -6,7 +6,9 @@ Directory API Endpoint — /core/directory uchun universal handler.
 Har xil slug'lar (product_product, outlet_client) bilan ishlaydi.
 """
 
-from erpnext_with_ibox.ibox.config import DIRECTORY_ENDPOINT, PAGE_SIZE
+import time
+
+from erpnext_with_ibox.ibox.config import DIRECTORY_ENDPOINT, PAGE_SIZE, API_PAGE_DELAY
 
 
 class DirectoryEndpoint:
@@ -65,4 +67,5 @@ class DirectoryEndpoint:
             if page >= total_pages or len(records) < per_page:
                 break
 
+            time.sleep(API_PAGE_DELAY)
             page += 1

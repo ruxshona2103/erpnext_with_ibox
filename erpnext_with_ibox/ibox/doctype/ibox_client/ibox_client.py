@@ -12,7 +12,6 @@ class iBoxClient(Document):
         if self.api_base_url and self.api_base_url.endswith("/"):
             self.api_base_url = self.api_base_url.rstrip("/")
 
-        # Internal API credentiallarni tekshirish (ogohlantirish)
         if not self.internal_api_login or not self.internal_api_password:
             frappe.msgprint(
                 "Internal API Login yoki Password bo'sh. "
@@ -42,29 +41,29 @@ class iBoxClient(Document):
         except Exception as e:
             return {"success": False, "message": str(e)[:200]}
 
-    # ── Master Sync (to'liq sinxronizatsiya) ─────────────────────────
+    # ── Internal: yangi sync oldidan tozalash ────────────────────────
+
+    def _prepare_for_sync(self):
+        """Har qanday yangi sync boshlashdan oldin — eski stop flag va lock tozalash."""
+        frappe.cache().delete_value(f"ibox_sync_stop_{self.name}")
+        frappe.cache().delete_value(f"ibox_sync_lock_{self.name}")
+
+    # ── Master Sync ──────────────────────────────────────────────────
 
     @frappe.whitelist()
     def sync_now(self):
-        """
-        To'liq master sinxronizatsiya — Omborlar → Taminotchilar → Mijozlar → Mahsulotlar.
-
-        Xaridlar alohida trigger qilinadi (asosiy ma'lumotlar tayyor bo'lgandan keyin).
-        Background job sifatida ishga tushiriladi.
-        """
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
             queue=SYNC_QUEUE,
             timeout=SYNC_TIMEOUT,
             client_name=self.name,
-            # handler_names=None => runner MASTER_SYNC_ORDER ni ishlatadi
         )
         return {
             "message": (
                 "To'liq sinxronizatsiya boshlandi!\n\n"
                 "Tartib: Omborlar → Taminotchilar → Mijozlar → Mahsulotlar\n\n"
-                "Sync Status maydonini kuzating — har bir modul tugaganda "
-                "yangilanib boradi."
+                "Sync Status maydonini kuzating."
             )
         }
 
@@ -72,55 +71,43 @@ class iBoxClient(Document):
 
     @frappe.whitelist()
     def sync_warehouses(self):
-        """Faqat omborxonalarni sync qilish (background job)."""
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
-            queue=SYNC_QUEUE,
-            timeout=SYNC_TIMEOUT,
-
-            client_name=self.name,
-            handler_names=["warehouses"],
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["warehouses"],
         )
-        return {"message": "Omborxonalar sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
+        return {"message": "Omborxonalar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_suppliers(self):
-        """Faqat taminotchilarni sync qilish (background job)."""
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
-            queue=SYNC_QUEUE,
-            timeout=SYNC_TIMEOUT,
-
-            client_name=self.name,
-            handler_names=["suppliers"],
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["suppliers"],
         )
-        return {"message": "Taminotchilar sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
+        return {"message": "Taminotchilar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_customers(self):
-        """Faqat mijozlarni sync qilish (background job)."""
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
-            queue=SYNC_QUEUE,
-            timeout=SYNC_TIMEOUT,
-
-            client_name=self.name,
-            handler_names=["customers"],
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["customers"],
         )
-        return {"message": "Mijozlar sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
+        return {"message": "Mijozlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_purchases(self):
-        """Faqat XARIDLARNI sync qilish — vozvratlar yuklanmaydi (background job)."""
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
-            queue=SYNC_QUEUE,
-            timeout=SYNC_TIMEOUT,
-
-            client_name=self.name,
-            handler_names=["purchases_only"],
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["purchases_only"],
         )
-        return {"message": "Xaridlar sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
+        return {"message": "Xaridlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_payments(self):
@@ -137,29 +124,23 @@ class iBoxClient(Document):
 
     @frappe.whitelist()
     def sync_returns(self):
-        """Faqat VOZVRATLARNI sync qilish — xaridlar yuklanmaydi (background job)."""
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
-            queue=SYNC_QUEUE,
-            timeout=SYNC_TIMEOUT,
-
-            client_name=self.name,
-            handler_names=["returns_only"],
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["returns_only"],
         )
-        return {"message": "Vozvratlar sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
+        return {"message": "Vozvratlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_exchange_rates(self):
-        """Valyuta kurslarini sync qilish (background job)."""
+        self._prepare_for_sync()
         frappe.enqueue(
             "erpnext_with_ibox.ibox.sync.runner.sync_client",
-            queue=SYNC_QUEUE,
-            timeout=SYNC_TIMEOUT,
-
-            client_name=self.name,
-            handler_names=["exchange_rates"],
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["exchange_rates"],
         )
-        return {"message": "Valyuta kurslari sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
+        return {"message": "Valyuta kurslari sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_cashboxes(self):
@@ -204,25 +185,99 @@ class iBoxClient(Document):
             frappe.log_error(title=f"Cashbox Sync Error - {self.name}", message=str(e))
             frappe.throw(f"Kassalarni tortishda xatolik yuz berdi: {str(e)[:200]}")
 
-    # ── Stop Sync ─────────────────────────────────────────────────
+    @frappe.whitelist()
+    def sync_sales(self):
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["sales"],
+        )
+        return {"message": "Sotuvlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    @frappe.whitelist()
+    def sync_items(self):
+        """Faqat MAHSULOTLARNI sync qilish — real-time total tracking bilan."""
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["items"],
+        )
+        return {"message": "Mahsulotlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    # ── Stop Sync (Industrial-Grade) ──────────────────────────────────
 
     @frappe.whitelist()
     def stop_sync(self):
-        """Barcha ishlab turgan sync joblarni to'xtatish (cache flag orqali)."""
-        cache_key = f"ibox_sync_stop_{self.name}"
-        frappe.cache().set_value(cache_key, True, expires_in_sec=300)  # 5 daqiqa
+        """
+        Barcha ishlab turgan sync joblarni TO'LIQ to'xtatish.
 
+        1. Cache flag → base.py har recordda tekshiradi va to'xtaydi
+        2. DB dagi bloklayotgan querylarni KILL → migrate bloklanmaydi
+        3. RQ queue dagi kutayotgan joblarni cancel
+        4. Lock + flag tozalash → qayta sync darhol mumkin
+        """
+        # 1) Stop signal
+        frappe.cache().set_value(
+            f"ibox_sync_stop_{self.name}", True, expires_in_sec=30
+        )
+
+        # 2) Bloklayotgan DB querylarni KILL qilish
+        killed = 0
+        try:
+            from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
+            killed = BaseSyncHandler.kill_blocking_queries(self.name)
+        except Exception:
+            pass
+
+        # 3) RQ queue dagi kutayotgan joblarni cancel
+        jobs_cancelled = 0
+        try:
+            from frappe.utils.background_jobs import get_redis_conn
+            from rq import Queue
+
+            conn = get_redis_conn()
+            for queue_name in ["long", "default", "short"]:
+                try:
+                    q = Queue(queue_name, connection=conn)
+                    for job in q.jobs:
+                        if (
+                            hasattr(job, "kwargs")
+                            and job.kwargs
+                            and job.kwargs.get("client_name") == self.name
+                        ):
+                            job.cancel()
+                            jobs_cancelled += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 4) Barcha flaglarni tozalash — qayta sync bloklanamasligi uchun
+        frappe.cache().delete_value(f"ibox_sync_stop_{self.name}")
+        frappe.cache().delete_value(f"ibox_sync_lock_{self.name}")
+
+        # 5) Status yangilash
         frappe.db.set_value(
             "iBox Client", self.name, "sync_status",
-            "TO'XTATISH buyrug'i berildi... ⏳",
+            f"TO'XTATILDI ⛔ ({killed} query kill, {jobs_cancelled} job cancel). "
+            f"Qayta sync qilish mumkin.",
             update_modified=False,
         )
         frappe.db.commit()
 
-        return {"message": "Sinxronizatsiya to'xtatish buyrug'i yuborildi. Joriy modul tugagach to'xtaydi."}
+        return {
+            "message": (
+                f"Sinxronizatsiya to'xtatildi!\n"
+                f"{killed} ta DB query kill qilindi.\n"
+                f"{jobs_cancelled} ta kutayotgan job bekor qilindi.\n"
+                f"Qayta sync qilish mumkin."
+            )
+        }
 
     @frappe.whitelist()
     def clear_stop_flag(self):
-        """Stop flagni tozalash (yangi sync boshlashdan oldin)."""
+        """Stop flag va lock tozalash (backup)."""
         frappe.cache().delete_value(f"ibox_sync_stop_{self.name}")
-
+        frappe.cache().delete_value(f"ibox_sync_lock_{self.name}")

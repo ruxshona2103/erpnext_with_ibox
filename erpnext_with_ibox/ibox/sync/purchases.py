@@ -43,6 +43,9 @@ class PurchaseSyncHandler(BaseSyncHandler):
     DOCTYPE = "Purchase Invoice"
     NAME = "Purchases"
 
+    # Mirror Sync: iBox ID field nomi (deduplication va cleanup uchun)
+    IBOX_ID_FIELD = "custom_ibox_purchase_id"
+
     # Sync mode: None = hammasi, "purchases" = faqat xarid, "returns" = faqat vozvrat
     SYNC_MODE: str | None = None
 
@@ -50,6 +53,67 @@ class PurchaseSyncHandler(BaseSyncHandler):
         super().__init__(api_client, client_doc)
         # Per-sync-run cache: {date_str: rate} — DB ni har safar so'ramaslik uchun
         self._rate_cache: dict[str, float] = {}
+        # Retry: birinchi urinishda skip qilingan recordlar (item/supplier/warehouse topilmagan)
+        self._retry_queue: list[dict] = []
+
+    def run(self) -> dict:
+        """
+        Override: BaseSyncHandler.run() + retry logikasi.
+
+        100% Mirror Sync — HECH QACHON farq bo'lmasligi kerak:
+          1. Asosiy sync — barcha recordlarni upsert qilish
+          2. Retry — birinchi urinishda skip qilinganlarni qayta urinish
+             (master data parallel sync qilingan bo'lishi mumkin)
+          3. Cleanup — iBox da yo'q bo'lgan orphanlarni o'chirish
+        """
+        result = super().run()
+
+        # ── Retry: skip qilingan recordlarni qayta urinish ───────────
+        if self._retry_queue:
+            retry_count = len(self._retry_queue)
+            self._set_status(
+                f"{self.NAME}: {retry_count} ta skip qilingan recordni qayta urinish..."
+            )
+
+            retry_synced = 0
+            retry_errors = 0
+
+            for record in self._retry_queue:
+                try:
+                    if self.upsert(record):
+                        retry_synced += 1
+                except Exception:
+                    retry_errors += 1
+                    frappe.log_error(
+                        title=f"{self.NAME} Retry Error - {self.client_name}",
+                        message=(
+                            f"record_id={record.get('id')}\n"
+                            f"{frappe.get_traceback()}"
+                        ),
+                    )
+
+            frappe.db.commit()
+
+            if retry_synced > 0 or retry_errors > 0:
+                result["retry_synced"] = retry_synced
+                result["retry_errors"] = retry_errors
+                result["synced"] = result.get("synced", 0) + retry_synced
+
+            # Retry dan keyin yakuniy holat
+            erp_count = self._get_erp_count()
+            cleanup = result.get("cleanup", {})
+            deleted = cleanup.get("deleted", 0) if cleanup else 0
+            cleanup_str = f", 🗑️ {deleted} ta o'chirildi" if deleted else ""
+            still_missing = retry_count - retry_synced
+            missing_str = f", ⚠️ {still_missing} ta import qilib bo'lmadi" if still_missing > 0 else ""
+
+            self._set_status(
+                f"Tayyor: iBox: {self.ibox_total} | ERPNext: {erp_count} "
+                f"({result.get('synced', 0)} ta yangi, "
+                f"{result.get('errors', 0)} ta xato{cleanup_str}{missing_str})"
+            )
+
+        return result
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox API dan xarid va/yoki vozvrat recordlarni yield qilish."""
@@ -72,16 +136,19 @@ class PurchaseSyncHandler(BaseSyncHandler):
         doc_label = "Vozvrat" if is_return else "Xarid"
 
         # ── 1) Deduplication ───────────────────────────────────────────
+        #   docstatus < 2 → Draft (0) yoki Submitted (1) mavjud bo'lsa skip.
+        #   Cancelled (2) bo'lsa → qayta import qilish mumkin.
         existing = frappe.db.get_value(
             "Purchase Invoice",
             {
                 "custom_ibox_purchase_id": ibox_id,
                 "custom_ibox_client": self.client_name,
+                "docstatus": ["<", 2],
             },
             "name",
         )
         if existing:
-            return False  # allaqachon import qilingan
+            return False  # allaqachon import qilingan (Draft yoki Submitted)
 
         # ── 2) Company ────────────────────────────────────────────────
         company = self.client_doc.company
@@ -96,14 +163,19 @@ class PurchaseSyncHandler(BaseSyncHandler):
         outlet_id = record.get("outlet_id")
         supplier_name = self._resolve_supplier(outlet_id)
         if not supplier_name:
-            frappe.log_error(
-                title=f"{doc_label} Sync - Supplier topilmadi - {self.client_name}",
-                message=(
-                    f"ibox_purchase_id={ibox_id}, outlet_id={outlet_id}\n"
-                    f"ERPNext'da custom_ibox_id={outlet_id} bo'lgan Supplier "
-                    f"topilmadi. Record o'tkazib yuborildi."
-                ),
-            )
+            # Retry queuega tashlash — keyinroq master data sync bo'lgandan keyin urinish
+            if not record.get("_is_retry"):
+                record["_is_retry"] = True
+                self._retry_queue.append(record)
+            else:
+                frappe.log_error(
+                    title=f"{doc_label} Sync - Supplier topilmadi - {self.client_name}",
+                    message=(
+                        f"ibox_purchase_id={ibox_id}, outlet_id={outlet_id}\n"
+                        f"ERPNext'da custom_ibox_id={outlet_id} bo'lgan Supplier "
+                        f"topilmadi. Retry ham muvaffaqiyatsiz."
+                    ),
+                )
             return False
 
         # ── 4) Warehouse lookup ────────────────────────────────────────
@@ -132,15 +204,19 @@ class PurchaseSyncHandler(BaseSyncHandler):
             if fallback:
                 warehouse_name = fallback
             else:
-                frappe.log_error(
-                    title=f"{doc_label} Sync - Warehouse topilmadi - {self.client_name}",
-                    message=(
-                        f"ibox_purchase_id={ibox_id}, warehouse_id={warehouse_id}\n"
-                        f"API detail qatorlarida warehouse_id yo'q va iBox Client da "
-                        f"default_warehouse ham belgilanmagan.\n"
-                        f"Yechim: iBox Client → 'Default Warehouse (Fallback)' ni to'ldiring."
-                    ),
-                )
+                if not record.get("_is_retry"):
+                    record["_is_retry"] = True
+                    self._retry_queue.append(record)
+                else:
+                    frappe.log_error(
+                        title=f"{doc_label} Sync - Warehouse topilmadi - {self.client_name}",
+                        message=(
+                            f"ibox_purchase_id={ibox_id}, warehouse_id={warehouse_id}\n"
+                            f"API detail qatorlarida warehouse_id yo'q va iBox Client da "
+                            f"default_warehouse ham belgilanmagan.\n"
+                            f"Yechim: iBox Client → 'Default Warehouse (Fallback)' ni to'ldiring."
+                        ),
+                    )
                 return False
 
         # ── 5) Currency va Account ────────────────────────────────────
@@ -194,14 +270,8 @@ class PurchaseSyncHandler(BaseSyncHandler):
             item_code = self._resolve_item(product_id)
 
             if not item_code:
-                frappe.log_error(
-                    title=f"{doc_label} Sync - Item topilmadi - {self.client_name}",
-                    message=(
-                        f"ibox_purchase_id={ibox_id}, product_id={product_id}\n"
-                        f"ERPNext'da custom_ibox_id={product_id} bo'lgan Item "
-                        f"topilmadi. Bu qator o'tkazib yuborildi."
-                    ),
-                )
+                # Item topilmadi — bu detail qatorini skip
+                # Agar barcha itemlar topilmasa, record retry queuega tushadi
                 continue
 
             # Row-level warehouse (header dan ustun turadi)
@@ -220,14 +290,26 @@ class PurchaseSyncHandler(BaseSyncHandler):
             # ── UOM — Item dan stock_uom olish ───────────────────────
             uom = self._resolve_uom(item_code)
 
+            # ── Rate — iBox dan haqiqiy narx ─────────────────────────
+            rate = abs(self._parse_float(
+                detail.get("price") or detail.get("cost") or detail.get("rate") or 0
+            ))
+            amount = abs(self._parse_float(detail.get("amount"))) or (abs(final_qty) * rate)
+            if is_return:
+                amount = -amount
+
+            # ── Item Name ─────────────────────────────────────────────
+            item_name = self._resolve_item_name(item_code)
+
             items.append({
                 "item_code": item_code,
+                "item_name": item_name,
                 "warehouse": row_wh_name,
                 "qty": final_qty,
-                "rate": 1,
-                "amount": final_qty * 1,
-                "base_rate": 1 * conversion_rate,
-                "base_amount": final_qty * 1 * conversion_rate,
+                "rate": rate,
+                "amount": amount,
+                "base_rate": rate * conversion_rate,
+                "base_amount": amount * conversion_rate,
                 "uom": uom,
                 "stock_uom": uom,
                 "stock_qty": final_qty,
@@ -237,45 +319,61 @@ class PurchaseSyncHandler(BaseSyncHandler):
             })
 
         if not items:
-            frappe.log_error(
-                title=f"{doc_label} Sync - Bo'sh items - {self.client_name}",
-                message=(
-                    f"ibox_purchase_id={ibox_id}: Hech qanday item mapping "
-                    f"topilmadi. Hujjat yaratilmadi."
-                ),
-            )
+            if not record.get("_is_retry"):
+                record["_is_retry"] = True
+                self._retry_queue.append(record)
+            else:
+                frappe.log_error(
+                    title=f"{doc_label} Sync - Bo'sh items - {self.client_name}",
+                    message=(
+                        f"ibox_purchase_id={ibox_id}: Hech qanday item mapping "
+                        f"topilmadi. Retry ham muvaffaqiyatsiz."
+                    ),
+                )
             return False
 
         # ── 8) Purchase Invoice DRAFT ─────────────────────────────────
-        pi = frappe.get_doc({
-            "doctype": "Purchase Invoice",
-            "supplier": supplier_name,
-            "company": company,
-            "currency": currency,
-            "credit_to": credit_to,
-            "conversion_rate": conversion_rate,
-            "plc_conversion_rate": conversion_rate,
-            "is_return": 1 if is_return else 0,
-            "update_stock": 1,
-            "set_warehouse": warehouse_name,
-            "docstatus": 0,                         # DRAFT — hech qachon avtomatik submit yo'q
-            "custom_ibox_purchase_id": ibox_id,
-            "custom_ibox_client": self.client_name,
-            "custom_ibox_total": ibox_total,
-            "items": items,
-        })
+        pi = frappe.new_doc("Purchase Invoice")
+        pi.supplier = supplier_name
+        pi.company = company
+        pi.currency = currency
+        pi.credit_to = credit_to
+        pi.buying_price_list = "Standard Buying"
+        pi.price_list_currency = currency
+        pi.conversion_rate = conversion_rate
+        pi.plc_conversion_rate = conversion_rate
+        pi.is_return = 1 if is_return else 0
+        pi.update_stock = 1
+        pi.set_warehouse = warehouse_name
+        pi.custom_ibox_purchase_id = ibox_id
+        pi.custom_ibox_client = self.client_name
+        pi.custom_ibox_total = ibox_total
 
-        # ── 8.1) Insert — validate() da get_exchange_rate tashqi API ni
-        #    chaqiradi va xato beradi. Mock patch bilan 1.0 qaytaramiz.
-        #    DRAFT hujjat — foydalanuvchi submit qilishdan oldin to'g'ri
-        #    kursni qo'lda kiritadi.
+        for row in items:
+            pi.append("items", row)
+
+        # ── 8.1) set_missing_values() → keyin OVERWRITE ─────────────
+        #    set_missing_values har xil default qiymatlarni to'ldiradi.
+        #    Property Setter orqali item_name uzunligi 1000 ga ko'tarilgan,
+        #    shuning uchun insert_item_price patchga hojat yo'q.
         from unittest.mock import patch
 
         with patch(
             "erpnext.controllers.accounts_controller.get_exchange_rate",
-            return_value=1.0,
+            return_value=conversion_rate,
         ):
-            pi.flags.ignore_validate = True
+            pi.set_missing_values()
+
+        # OVERWRITE — set_missing_values qayta yozgan bo'lishi mumkin
+        pi.currency = currency
+        pi.credit_to = credit_to
+        pi.conversion_rate = conversion_rate
+        pi.plc_conversion_rate = conversion_rate
+
+        with patch(
+            "erpnext.controllers.accounts_controller.get_exchange_rate",
+            return_value=conversion_rate,
+        ):
             pi.insert(ignore_permissions=True)
 
         # ── 9) Har bir muvaffaqiyatli hujjatdan keyin commit ─────────
@@ -288,14 +386,44 @@ class PurchaseSyncHandler(BaseSyncHandler):
     # ══════════════════════════════════════════════════════════════════
 
     def _resolve_supplier(self, outlet_id) -> str | None:
-        """iBox outlet_id → ERPNext Supplier.name  (field: custom_ibox_id)"""
+        """
+        iBox outlet_id → ERPNext Supplier.name  (field: custom_ibox_id)
+
+        Topilmasa → placeholder Supplier avtomatik yaratiladi.
+        Bu 100% mirror sync kafolatini beradi — hech qanday purchase
+        supplier topilmaganidan skip qilinmaydi.
+        """
         if not outlet_id:
             return None
-        return frappe.db.get_value(
+        name = frappe.db.get_value(
             "Supplier",
             {"custom_ibox_id": outlet_id, "custom_ibox_client": self.client_name},
             "name",
         )
+        if name:
+            return name
+
+        # Auto-create: placeholder supplier
+        try:
+            supplier_name = f"iBox-Supplier-{outlet_id}"
+            doc = frappe.new_doc("Supplier")
+            doc.supplier_name = supplier_name
+            doc.supplier_group = "All Supplier Groups"
+            doc.custom_ibox_id = str(outlet_id)
+            doc.custom_ibox_client = self.client_name
+            doc.insert(ignore_permissions=True)
+            frappe.db.commit()
+            frappe.log_error(
+                title=f"Auto-created Supplier - {self.client_name}",
+                message=f"Supplier '{supplier_name}' (ibox_id={outlet_id}) avtomatik yaratildi.",
+            )
+            return doc.name
+        except Exception:
+            frappe.log_error(
+                title=f"Supplier Auto-Create Error - {self.client_name}",
+                message=f"outlet_id={outlet_id}\n{frappe.get_traceback()}",
+            )
+            return None
 
     def _resolve_warehouse(self, warehouse_id) -> str | None:
         """iBox warehouse_id → ERPNext Warehouse.name  (field: custom_ibox_warehouse_id)"""
@@ -308,14 +436,48 @@ class PurchaseSyncHandler(BaseSyncHandler):
         )
 
     def _resolve_item(self, product_id) -> str | None:
-        """iBox product_id → ERPNext Item.name  (field: custom_ibox_id)"""
+        """
+        iBox product_id → ERPNext Item.name  (field: custom_ibox_id)
+
+        Topilmasa → placeholder Item avtomatik yaratiladi.
+        Bu 100% mirror sync kafolatini beradi — hech qanday purchase
+        item topilmaganidan skip qilinmaydi.
+        """
         if not product_id:
             return None
-        return frappe.db.get_value(
+        name = frappe.db.get_value(
             "Item",
             {"custom_ibox_id": product_id, "custom_ibox_client": self.client_name},
             "name",
         )
+        if name:
+            return name
+
+        # Auto-create: placeholder item
+        try:
+            item_name = f"iBox-Product-{product_id}"
+            doc = frappe.new_doc("Item")
+            doc.item_code = item_name
+            doc.item_name = item_name
+            doc.item_group = "All Item Groups"
+            doc.stock_uom = "Nos"
+            doc.is_stock_item = 1
+            doc.custom_ibox_id = str(product_id)
+            doc.custom_ibox_client = self.client_name
+            doc.append("uoms", {"uom": "Nos", "conversion_factor": 1.0})
+            doc.insert(ignore_permissions=True)
+            frappe.db.commit()
+            frappe.log_error(
+                title=f"Auto-created Item - {self.client_name}",
+                message=f"Item '{item_name}' (ibox_id={product_id}) avtomatik yaratildi.",
+            )
+            return doc.name
+        except Exception:
+            frappe.log_error(
+                title=f"Item Auto-Create Error - {self.client_name}",
+                message=f"product_id={product_id}\n{frappe.get_traceback()}",
+            )
+            return None
 
     def _resolve_uom(self, item_code: str) -> str:
         """Item.stock_uom ni olish. Topilmasa 'Nos' (ERPNext default)."""
@@ -323,6 +485,13 @@ class PurchaseSyncHandler(BaseSyncHandler):
             return "Nos"
         uom = frappe.db.get_value("Item", item_code, "stock_uom")
         return uom or "Nos"
+
+    def _resolve_item_name(self, item_code: str) -> str:
+        """Item.item_name ni olish. Topilmasa item_code qaytaradi."""
+        if not item_code:
+            return ""
+        name = frappe.db.get_value("Item", item_code, "item_name")
+        return name or item_code
 
     def _resolve_currency_account(self, currency_code: str) -> tuple:
         """

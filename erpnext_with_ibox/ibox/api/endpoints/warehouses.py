@@ -6,7 +6,9 @@ Warehouse API Endpoint — /core/directory?data=core_warehouse uchun handler.
 Directory API orqali omborxona ma'lumotlarini olish.
 """
 
-from erpnext_with_ibox.ibox.config import DIRECTORY_ENDPOINT, PAGE_SIZE, SLUG_WAREHOUSES
+import time
+
+from erpnext_with_ibox.ibox.config import DIRECTORY_ENDPOINT, PAGE_SIZE, SLUG_WAREHOUSES, API_PAGE_DELAY
 
 
 class WarehouseEndpoint:
@@ -63,4 +65,5 @@ class WarehouseEndpoint:
             if page >= total_pages or len(records) < per_page:
                 break
 
+            time.sleep(API_PAGE_DELAY)
             page += 1

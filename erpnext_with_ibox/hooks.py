@@ -93,16 +93,19 @@ app_license = "mit"
 
 # Fixtures
 # --------
-fixtures = [
-    {
-        "dt": "Custom Field",
-        "filters": [["module", "=", "ibox"]]
-    },
-    {
-        "dt": "Property Setter",
-        "filters": [["module", "=", "ibox"]]
-    }
-]
+# Fixtures migrate paytida avtomatik sync qilinmaydi (tezlik uchun).
+# Eksport:  bench export-fixtures
+# Import:   bench --site <site> import-fixtures
+# fixtures = [
+#     {
+#         "dt": "Custom Field",
+#         "filters": [["module", "=", "ibox"]]
+#     },
+#     {
+#         "dt": "Property Setter",
+#         "filters": [["module", "=", "ibox"]]
+#     }
+# ]
 
 # Integration Setup
 # ------------------
@@ -166,7 +169,10 @@ scheduler_events = {
 		"50 18 * * *": [
 			"erpnext_with_ibox.ibox.sync.runner.sync_all_clients"
 		]
-	}
+	},
+	"daily": [
+		"erpnext_with_ibox.ibox.utils.cleanup_old_logs"
+	]
 }
 
 # Testing

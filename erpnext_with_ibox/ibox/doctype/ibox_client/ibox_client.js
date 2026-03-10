@@ -200,6 +200,49 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
+            // ── Mahsulotlarni Yuklash ─────────────────────────────────
+            frm.add_custom_button(__("Mahsulotlarni Yuklash"), function () {
+                frappe.call({
+                    method: "sync_items",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Mahsulotlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    },
+                    error: function () {
+                        frappe.msgprint({
+                            title: __("Xato"),
+                            indicator: "red",
+                            message: "Mahsulotlar sinxronizatsiyasini boshlashda xatolik"
+                        });
+                    }
+                });
+            }, __("Actions"));
+
+            // ── Sotuvlarni Yuklash ───────────────────────────────────
+            frm.add_custom_button(__("Sotuvlarni Yuklash"), function () {
+                frappe.call({
+                    method: "sync_sales",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Sotuvlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    }
+                });
+            }, __("Actions"));
+
             // ── Sinxronizatsiyani To'xtatish ─────────────────────────
             frm.add_custom_button(__("Sinxronizatsiyani To'xtatish"), function () {
                 frappe.confirm(

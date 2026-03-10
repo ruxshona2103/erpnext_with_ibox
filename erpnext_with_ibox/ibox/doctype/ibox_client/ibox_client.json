@@ -26,7 +26,13 @@
         "uzs_payable_account",
         "usd_payable_account",
         "cashboxes_section",
-        "cashboxes"
+        "cashboxes",
+        "sales_accounts_section",
+        "uzs_receivable_account",
+        "usd_receivable_account",
+        "column_break_sales_income",
+        "uzs_sales_income",
+        "usd_sales_income"
     ],
     "fields": [
         {
@@ -99,11 +105,11 @@
             "reqd": 1
         },
         {
+            "description": "Xarid API da warehouse_id bo'lmasa, ushbu ombor ishlatiladi.",
             "fieldname": "default_warehouse",
             "fieldtype": "Link",
             "label": "Default Warehouse (Fallback)",
-            "options": "Warehouse",
-            "description": "Xarid API da warehouse_id bo'lmasa, ushbu ombor ishlatiladi."
+            "options": "Warehouse"
         },
         {
             "fieldname": "column_break_sync",
@@ -124,15 +130,17 @@
         {
             "fieldname": "currency_section",
             "fieldtype": "Section Break",
-            "label": "Currency "
+            "label": "Purchase Accounts"
         },
         {
+            "description": "Xarid Invoice uchun UZS Kreditor hisobi (credit_to)",
             "fieldname": "uzs_payable_account",
             "fieldtype": "Link",
             "label": "UZS Payable Account",
             "options": "Account"
         },
         {
+            "description": "Xarid Invoice uchun USD Kreditor hisobi (credit_to)",
             "fieldname": "usd_payable_account",
             "fieldtype": "Link",
             "label": "USD Payable Account",
@@ -148,11 +156,48 @@
             "fieldtype": "Table",
             "label": "Cashboxes",
             "options": "iBox Cashbox Mapping"
+        },
+        {
+            "fieldname": "sales_accounts_section",
+            "fieldtype": "Section Break",
+            "label": "Sales Accounts"
+        },
+        {
+            "description": "Sotuv Invoice uchun UZS Debitor hisobi (debit_to)",
+            "fieldname": "uzs_receivable_account",
+            "fieldtype": "Link",
+            "label": "UZS Receivable Account (Debit To)",
+            "options": "Account"
+        },
+        {
+            "description": "Sotuv Invoice uchun USD Debitor hisobi (debit_to)",
+            "fieldname": "usd_receivable_account",
+            "fieldtype": "Link",
+            "label": "USD Receivable Account (Debit To)",
+            "options": "Account"
+        },
+        {
+            "fieldname": "column_break_sales_income",
+            "fieldtype": "Column Break"
+        },
+        {
+            "description": "Sotuv Invoice Item uchun UZS daromad hisobi",
+            "fieldname": "uzs_sales_income",
+            "fieldtype": "Link",
+            "label": "UZS Sales Income Account",
+            "options": "Account"
+        },
+        {
+            "description": "Sotuv Invoice Item uchun USD daromad hisobi",
+            "fieldname": "usd_sales_income",
+            "fieldtype": "Link",
+            "label": "USD Sales Income Account",
+            "options": "Account"
         }
     ],
     "index_web_pages_for_search": 1,
     "links": [],
-    "modified": "2026-02-27 18:09:51.522132",
+    "modified": "2026-03-07 10:32:00.000000",
     "modified_by": "Administrator",
     "module": "ibox",
     "name": "iBox Client",

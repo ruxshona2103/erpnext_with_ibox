@@ -9,10 +9,13 @@ Ikki endpoint bilan ishlaydi:
   - /api/integration/document/supplier-return/list   (Vozvratlar / Debit Note)
 """
 
+import time
+
 from erpnext_with_ibox.ibox.config import (
     PURCHASE_ENDPOINT,
     PURCHASE_RETURN_ENDPOINT,
     PURCHASE_PAGE_SIZE,
+    API_PAGE_DELAY,
 )
 
 
@@ -65,6 +68,7 @@ class PurchaseEndpoint:
             if page >= total_pages or len(records) < per_page:
                 break
 
+            time.sleep(API_PAGE_DELAY)
             page += 1
 
     # ── Purchase Return (Vozvrat) ─────────────────────────────────────
@@ -104,6 +108,7 @@ class PurchaseEndpoint:
             if page >= total_pages or len(records) < per_page:
                 break
 
+            time.sleep(API_PAGE_DELAY)
             page += 1
 
     # ── Combined Generator ────────────────────────────────────────────

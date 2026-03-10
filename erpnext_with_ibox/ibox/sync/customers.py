@@ -15,10 +15,34 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 
 class CustomerSyncHandler(BaseSyncHandler):
     DOCTYPE = "Customer"
-    NAME = "Customers"
+    NAME = "Mijozlar"
 
     def fetch_data(self) -> Generator[dict, None, None]:
-        yield from self.api.directory.get_all(slug=SLUG_CUSTOMERS)
+        """iBox mijozlarni yield + total saqlash."""
+        page = 1
+        total_pages = None
+
+        while True:
+            response = self.api.directory.get_page(slug=SLUG_CUSTOMERS, page=page, per_page=1000)
+            records = response.get("data", [])
+
+            if total_pages is None:
+                self.ibox_total = response.get("total", 0)
+                last_page = response.get("last_page")
+                total_pages = last_page or max(1, -(-self.ibox_total // 1000))
+
+            if not records:
+                break
+
+            yield from records
+
+            if page >= total_pages or len(records) < 1000:
+                break
+
+            import time
+            from erpnext_with_ibox.ibox.config import API_PAGE_DELAY
+            time.sleep(API_PAGE_DELAY)
+            page += 1
 
     def upsert(self, record: dict) -> bool:
         ibox_id = record.get("id")

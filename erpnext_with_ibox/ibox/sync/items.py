@@ -6,20 +6,43 @@ Item Sync Handler — iBox product_product -> ERPNext Item.
 """
 
 import re
+import time
 from typing import Generator
 
 import frappe
 
-from erpnext_with_ibox.ibox.config import SLUG_ITEMS
+from erpnext_with_ibox.ibox.config import SLUG_ITEMS, API_PAGE_DELAY
 from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 
 
 class ItemSyncHandler(BaseSyncHandler):
     DOCTYPE = "Item"
-    NAME = "Items"
+    NAME = "Mahsulotlar"
 
     def fetch_data(self) -> Generator[dict, None, None]:
-        yield from self.api.directory.get_all(slug=SLUG_ITEMS)
+        """iBox directory API dan mahsulotlarni yield qilish + total ni saqlash."""
+        page = 1
+        total_pages = None
+
+        while True:
+            response = self.api.directory.get_page(slug=SLUG_ITEMS, page=page, per_page=1000)
+            records = response.get("data", [])
+
+            if total_pages is None:
+                self.ibox_total = response.get("total", 0)
+                last_page = response.get("last_page")
+                total_pages = last_page or max(1, -(-self.ibox_total // 1000))
+
+            if not records:
+                break
+
+            yield from records
+
+            if page >= total_pages or len(records) < 1000:
+                break
+
+            time.sleep(API_PAGE_DELAY)
+            page += 1
 
     def upsert(self, record: dict) -> bool:
         ibox_id = record.get("id")
@@ -27,7 +50,6 @@ class ItemSyncHandler(BaseSyncHandler):
         base_code = self._sanitize(item_name)[:130] or f"IBOX-{ibox_id}"
         item_code = base_code
 
-        # Duplicate item_code tekshirish — boshqa ibox_id li item mavjudmi?
         dup = frappe.db.get_value(
             "Item",
             {"name": item_code},
@@ -35,7 +57,6 @@ class ItemSyncHandler(BaseSyncHandler):
             as_dict=True,
         )
         if dup and str(dup.custom_ibox_id) != str(ibox_id):
-            # Boshqa product bir xil nomda — suffix qo'shamiz
             item_code = f"{base_code}-{ibox_id}"
 
         item_group = (
