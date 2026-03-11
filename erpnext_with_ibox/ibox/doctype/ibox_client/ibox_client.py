@@ -123,6 +123,19 @@ class iBoxClient(Document):
         return {"message": "To'lovlar sinxronizatsiyasi orqa fonda boshlandi. Sync Status maydonini kuzating."}
 
     @frappe.whitelist()
+    def sync_payments_made(self):
+        """Faqat CHIQUVCHI TO'LOVLARNI (Payment Made) sync qilish (maks. 200ta, background job)."""
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE,
+            timeout=SYNC_TIMEOUT,
+
+            client_name=self.name,
+            handler_names=["payments_made"],
+        )
+        return {"message": "Chiquvchi to'lovlar (maks 200 ta) sinxronizatsiyasi orqa fonda boshlandi."}
+
+    @frappe.whitelist()
     def sync_returns(self):
         self._prepare_for_sync()
         frappe.enqueue(

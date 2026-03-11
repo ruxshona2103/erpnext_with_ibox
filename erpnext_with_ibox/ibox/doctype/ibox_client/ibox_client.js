@@ -145,6 +145,24 @@ frappe.ui.form.on("iBox Client", {
             }, __("Actions"));
 
 
+            // ── Chiquvchi To'lovlarni Yuklash (Maks 200 ta) ──
+            frm.add_custom_button(__("Chiquvchi To'lov (200 ta)"), function () {
+                frappe.call({
+                    method: "sync_payments_made",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Chiquvchi to'lovlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                    }
+                });
+            }, __("Actions"));
+
+
             // ── Vozvratlarni Yuklash (faqat vozvrat, xarid emas) ─────
             frm.add_custom_button(__("Vozvratlarni Yuklash"), function () {
                 frappe.call({
