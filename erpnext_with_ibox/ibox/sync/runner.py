@@ -32,6 +32,7 @@ _MODULE_LABELS = {
     "returns_only":    "Vozvratlar",
     "exchange_rates":  "Valyuta kurslari",
     "sales":           "Sotuvlar (Otgruzki)",
+    "payment_transfers": "Pul ko'chirishlar",
 }
 
 # Stagger delay — har bir client orasidagi kutish (sekundlarda)

@@ -1,0 +1,244 @@
+import time
+from typing import Generator
+
+import frappe
+from frappe.utils import flt
+
+from erpnext_with_ibox.ibox.config import SLUG_PAYMENT_TRANSFERS
+from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
+
+
+class PaymentTransferSyncHandler(BaseSyncHandler):
+    DOCTYPE = "Payment Entry"
+    NAME = "Payment Transfers (Ichki Pul Ko'chirishlar)"
+
+    def fetch_data(self) -> Generator[dict, None, None]:
+        """
+        iBox API dan faqatgina eng oxirgi 2 ta sahifani (maksimal 200 ta ko'chirish) yield qilish.
+        API ga ortiqcha og'irlik tushmasligi uchun limit qat'iy belgilangan.
+        """
+        max_pages = 2
+        per_page = 100
+
+        for page in range(1, max_pages + 1):
+            response = self.api.request(
+                method="GET",
+                endpoint=SLUG_PAYMENT_TRANSFERS,
+                params={"page": page, "per_page": per_page}
+            )
+            records = response.get("data", [])
+
+            if page == 1:
+                self.ibox_total = min(flt(response.get("total", 0)), max_pages * per_page)
+
+            if not records:
+                break
+
+            for record in records:
+                yield record
+
+            if len(records) < per_page:
+                break
+
+            time.sleep(1)
+
+    def upsert(self, record: dict) -> bool:
+        transfer_id = str(record.get("id"))
+        posting_date = (record.get("date") or "").split("T")[0] or frappe.utils.today()
+        company = self.client_doc.company
+        company_currency = frappe.db.get_value("Company", company, "default_currency") or "USD"
+        transfer_currency = record.get("currency_code") or company_currency
+        paid_amount = flt(record.get("total", 0), 2)
+
+        if not transfer_id or not paid_amount:
+            return False
+
+        if frappe.db.get_value("Payment Entry", {"custom_ibox_payment_detail_id": transfer_id}, "name"):
+            return False
+
+        from_cashbox_id = str(record.get("from_cashbox_id") or "")
+        to_cashbox_id = str(record.get("to_cashbox_id") or "")
+
+        from_mode_of_payment = self._get_mode_of_payment(
+            from_cashbox_id,
+            transfer_currency,
+            record.get("from_cashbox_name")
+        )
+        to_mode_of_payment = self._get_mode_of_payment(
+            to_cashbox_id,
+            transfer_currency,
+            record.get("to_cashbox_name")
+        )
+
+        if not from_mode_of_payment or not to_mode_of_payment:
+            self._log_config_error(
+                transfer_id,
+                f"Cashbox mapping topilmadi. from_cashbox_id={from_cashbox_id}, to_cashbox_id={to_cashbox_id}"
+            )
+            return False
+
+        paid_from = self._get_cashbox_account(from_mode_of_payment)
+        paid_to = self._get_cashbox_account(to_mode_of_payment)
+
+        if not paid_from or not paid_to:
+            self._log_config_error(
+                transfer_id,
+                (
+                    f"Mode of Payment account topilmadi. "
+                    f"from_mode_of_payment={from_mode_of_payment}, to_mode_of_payment={to_mode_of_payment}"
+                )
+            )
+            return False
+
+        if paid_from == paid_to:
+            self._log_config_error(
+                transfer_id,
+                f"paid_from va paid_to bir xil accountga tushib qoldi: {paid_from}."
+            )
+            return False
+
+        paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or company_currency
+        paid_to_currency = frappe.db.get_value("Account", paid_to, "account_currency") or company_currency
+
+        if transfer_currency and transfer_currency != paid_from_currency:
+            self._log_config_error(
+                transfer_id,
+                (
+                    f"Transfer currency ({transfer_currency}) source account currency bilan mos emas: "
+                    f"{paid_from_currency}. from_cashbox_id={from_cashbox_id}, account={paid_from}"
+                )
+            )
+            return False
+
+        if transfer_currency and transfer_currency != paid_to_currency:
+            self._log_config_error(
+                transfer_id,
+                (
+                    f"Transfer currency ({transfer_currency}) target account currency bilan mos emas: "
+                    f"{paid_to_currency}. to_cashbox_id={to_cashbox_id}, account={paid_to}"
+                )
+            )
+            return False
+
+        source_exchange_rate = self._get_exchange_rate(paid_from_currency, company_currency, posting_date)
+        target_exchange_rate = self._get_exchange_rate(paid_to_currency, company_currency, posting_date)
+        received_amount = flt(
+            paid_amount if source_exchange_rate == target_exchange_rate else paid_amount * source_exchange_rate / target_exchange_rate,
+            2,
+        )
+
+        try:
+            doc = frappe.get_doc({
+                "doctype": "Payment Entry",
+                "payment_type": "Internal Transfer",
+                "company": company,
+                "posting_date": posting_date,
+                "mode_of_payment": from_mode_of_payment,
+                "paid_from": paid_from,
+                "paid_to": paid_to,
+                "paid_from_account_currency": paid_from_currency,
+                "paid_to_account_currency": paid_to_currency,
+                "paid_amount": paid_amount,
+                "received_amount": received_amount,
+                "source_exchange_rate": source_exchange_rate,
+                "target_exchange_rate": target_exchange_rate,
+                "reference_no": record.get("number") or transfer_id,
+                "reference_date": posting_date,
+                "remarks": (
+                    f"iBox transfer #{record.get('number') or transfer_id}: "
+                    f"{record.get('from_cashbox_name') or from_cashbox_id} -> "
+                    f"{record.get('to_cashbox_name') or to_cashbox_id}"
+                ),
+                "custom_ibox_client": self.client_name,
+                "custom_ibox_payment_id": transfer_id,
+                "custom_ibox_payment_detail_id": transfer_id,
+            })
+            doc.set_missing_values()
+            doc.insert(ignore_permissions=True)
+            return True
+        except Exception:
+            frappe.log_error(
+                title=f"Payment Transfer Upsert Error - {self.client_name}",
+                message=f"transfer_id={transfer_id}\n{frappe.get_traceback()}"
+            )
+            return False
+
+    def _get_mode_of_payment(
+        self,
+        cashbox_id: str,
+        currency: str | None = None,
+        fallback_cashbox_name: str | None = None,
+    ) -> str:
+        fallback_mode_of_payment = None
+        cashbox_name = fallback_cashbox_name
+
+        for row in self.client_doc.get("cashboxes", []):
+            if str(row.cashbox_id) == str(cashbox_id):
+                fallback_mode_of_payment = row.mode_of_payment
+                cashbox_name = row.cashbox_name or fallback_cashbox_name
+                break
+
+        if currency and cashbox_name:
+            preferred_mode_of_payment = self._build_currency_mode_of_payment(cashbox_name, currency)
+            if frappe.db.exists("Mode of Payment", preferred_mode_of_payment):
+                return preferred_mode_of_payment
+
+        return fallback_mode_of_payment
+
+    def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
+        return f"iBox - {cashbox_name} ({currency})"
+
+    def _get_cashbox_account(self, mode_of_payment: str) -> str:
+        company = self.client_doc.company
+
+        mop_account = frappe.db.get_value(
+            "Mode of Payment Account",
+            {"parent": mode_of_payment, "company": company},
+            "default_account"
+        )
+        if mop_account:
+            return mop_account
+
+        return ""
+
+    def _get_exchange_rate(self, from_currency: str, company_currency: str, posting_date: str) -> float:
+        if from_currency == company_currency:
+            return 1.0
+
+        exchange_rate = flt(
+            frappe.db.get_value(
+                "Currency Exchange",
+                {
+                    "from_currency": from_currency,
+                    "to_currency": company_currency,
+                },
+                "exchange_rate"
+            )
+        )
+
+        if exchange_rate > 1 and from_currency == "UZS" and company_currency in ["USD", "EUR", "RUB"]:
+            exchange_rate = 1.0 / exchange_rate
+
+        if exchange_rate:
+            return exchange_rate
+
+        reverse_rate = flt(
+            frappe.db.get_value(
+                "Currency Exchange",
+                {
+                    "from_currency": company_currency,
+                    "to_currency": from_currency,
+                },
+                "exchange_rate"
+            )
+        )
+        if reverse_rate:
+            return 1.0 / reverse_rate
+
+        return 1.0
+
+    def _log_config_error(self, transfer_id: str, message: str) -> None:
+        frappe.log_error(
+            title=f"Payment Transfer Config Error - {self.client_name}",
+            message=f"transfer_id={transfer_id}: {message}"
+        )

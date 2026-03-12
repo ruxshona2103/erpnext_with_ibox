@@ -59,3 +59,4 @@ SYNC_TIMEOUT = 10800       # 3 soat har bir job uchun
 # -- Payment Sync --
 SLUG_PAYMENTS = "/api/integration/document/payment-received/list"
 SLUG_PAYMENTS_MADE = "/api/integration/document/payment-made/list"
+SLUG_PAYMENT_TRANSFERS = "/api/integration/document/payment-transfer/list"

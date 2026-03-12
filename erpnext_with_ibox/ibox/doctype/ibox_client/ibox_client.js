@@ -162,6 +162,23 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
+            // ── Ichki Pul Ko'chirishlarni Yuklash (Maks 200 ta) ──
+            frm.add_custom_button(__("Pul Ko'chirish (200 ta)"), function () {
+                frappe.call({
+                    method: "sync_payment_transfers",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Ichki pul ko'chirishlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                    }
+                });
+            }, __("Actions"));
+
 
             // ── Vozvratlarni Yuklash (faqat vozvrat, xarid emas) ─────
             frm.add_custom_button(__("Vozvratlarni Yuklash"), function () {

@@ -68,7 +68,7 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
             payment_currency = (detail.get("currency") or {}).get("code") or company_currency
 
             # Mode of Payment — cashbox mapping orqali to'lov kassa hisobini (paid_from) topish
-            mode_of_payment = self._get_mode_of_payment(cashbox_id)
+            mode_of_payment = self._get_mode_of_payment(cashbox_id, payment_currency)
             if not mode_of_payment:
                 continue
 
@@ -269,12 +269,26 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
             )
             return False
 
-    def _get_mode_of_payment(self, cashbox_id: str) -> str:
+    def _get_mode_of_payment(self, cashbox_id: str, currency: str | None = None) -> str:
         """Kassani o'rnatish."""
+        fallback_mode_of_payment = None
+        cashbox_name = None
+
         for row in self.client_doc.get("cashboxes", []):
             if str(row.cashbox_id) == str(cashbox_id):
-                return row.mode_of_payment
-        return None
+                fallback_mode_of_payment = row.mode_of_payment
+                cashbox_name = row.cashbox_name
+                break
+
+        if currency and cashbox_name:
+            preferred_mode_of_payment = self._build_currency_mode_of_payment(cashbox_name, currency)
+            if frappe.db.exists("Mode of Payment", preferred_mode_of_payment):
+                return preferred_mode_of_payment
+
+        return fallback_mode_of_payment
+
+    def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
+        return f"iBox - {cashbox_name} ({currency})"
 
     def _get_cashbox_account(self, mode_of_payment: str, currency: str) -> str:
         """Kassani (paid_from_account) hisobiga erishish."""
