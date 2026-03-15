@@ -2,9 +2,9 @@
 # For license information, please see license.txt
 
 """
-Stock Adjustment Sync Handler — iBox /api/document/stock-adjustment -> ERPNext Stock Reconciliation.
+Stock Adjustment Sync Handler — iBox /api/document/stock-adjustment -> ERPNext Stock Entry.
 
-iBox inventarizatsiya hujjatlari → ERPNext Stock Reconciliation (DRAFT).
+iBox inventarizatsiya hujjatlari → ERPNext Stock Entry (DRAFT).
 
 iBox API javobi (detail):
     {
@@ -16,20 +16,27 @@ iBox API javobi (detail):
             {
                 "id": 112910,
                 "product": {"id": 9055, "name": "..."},
-                "quantity": 1,         # Haqiqiy soni (actual count)
-                "stock": 0,            # Tizimda qolgan (system stock)
+                "quantity": 2,         # Delta: +2 = ortiqcha topildi
+                "stock": 5,            # Tizimda qolgan (system stock)
                 "price": 0,
                 "unit": {"short_name": "шт"}
+            },
+            {
+                "quantity": -1,        # Delta: -1 = kam topildi (chiqib ketdi)
+                "stock": 3,
             }
         ]
     }
 
-ERPNext Stock Reconciliation:
-    - purpose = "Stock Reconciliation"
-    - items[]: item_code, warehouse, qty (actual), valuation_rate
+quantity — DELTA (farq):
+    +N → ortiqcha topildi → Material Receipt (omborga kiritish)
+    -N → kam topildi → Material Issue (ombordan chiqarish)
+
+Bitta iBox adjustment dan 2 ta Stock Entry yaratilishi mumkin:
+    1. Material Receipt — barcha qty > 0 itemlar
+    2. Material Issue — barcha qty < 0 itemlar
 """
 
-import time
 from typing import Generator
 
 import frappe
@@ -39,23 +46,36 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 
 
 class StockAdjustmentSyncHandler(BaseSyncHandler):
-    DOCTYPE = "Stock Reconciliation"
+    DOCTYPE = "Stock Entry"
     NAME = "Stock Adjustments (Inventarizatsiya)"
+    NEEDS_INTERNAL_API = True
 
     IBOX_ID_FIELD = "custom_ibox_stock_adjustment_id"
 
+    def __init__(self, api_client, client_doc, internal_api=None):
+        super().__init__(api_client, client_doc)
+        self.internal_api = internal_api
+
     def fetch_data(self) -> Generator[dict, None, None]:
-        """iBox API dan stock adjustment recordlarni yield qilish."""
-        first_page = self.api.stock_adjustments.get_page(page=1, per_page=1)
+        """iBox Internal API dan stock adjustment recordlarni yield qilish."""
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 2
+
+        first_page = self.internal_api.stock_adjustments.get_page(page=1, per_page=1)
         self.ibox_total = first_page.get("total", 0)
 
-        for record in self.api.stock_adjustments.get_all(per_page=100, max_pages=2):
+        for record in self.internal_api.stock_adjustments.get_all(per_page=per_page, max_pages=max_pages):
             yield record
 
     def upsert(self, record: dict) -> bool:
         """
-        Bitta stock adjustment recordini ERPNext Stock Reconciliation ga yaratish.
-        Deduplication key: custom_ibox_stock_adjustment_id + custom_ibox_client
+        Bitta stock adjustment recordini ERPNext Stock Entry ga yaratish.
+
+        quantity > 0 → Material Receipt (ortiqcha topildi, omborga kiritamiz)
+        quantity < 0 → Material Issue (kam topildi, ombordan chiqaramiz)
+
+        Bitta iBox hujjatda ham plus ham minus bo'lishi mumkin —
+        shuning uchun 2 ta Stock Entry yaratiladi.
         """
         ibox_id = record.get("id")
         if not ibox_id:
@@ -63,7 +83,7 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
 
         # Deduplication
         existing = frappe.db.get_value(
-            "Stock Reconciliation",
+            "Stock Entry",
             {
                 "custom_ibox_stock_adjustment_id": str(ibox_id),
                 "custom_ibox_client": self.client_name,
@@ -75,7 +95,7 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
 
         company = self.client_doc.company
         raw_date = record.get("date", "")
-        posting_date = self._parse_date(raw_date)
+        posting_date = self._parse_date(raw_date) or frappe.utils.today()
         posting_time = self._parse_time(raw_date)
 
         # Warehouse
@@ -94,12 +114,14 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                 )
                 return False
 
-        # Details
+        # Detaillarni plus va minus ga ajratish
         details = record.get("stock_adjustment_details") or []
         if not details:
             return False
 
-        items = []
+        receipt_items = []  # qty > 0 → Material Receipt
+        issue_items = []    # qty < 0 → Material Issue
+
         for detail in details:
             product = detail.get("product") or {}
             product_id = product.get("id")
@@ -109,9 +131,11 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                 continue
 
             qty = flt(detail.get("quantity", 0))
+            if qty == 0:
+                continue
+
             valuation_rate = flt(detail.get("price", 0))
 
-            # Agar valuation_rate 0 bo'lsa, mavjud item narxini olish
             if valuation_rate <= 0:
                 valuation_rate = flt(
                     frappe.db.get_value("Item", item_code, "valuation_rate")
@@ -123,39 +147,81 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                     )
                 )
 
-            # Har bir item o'z detail warehouse ga ega bo'lishi mumkin
-            # lekin stock-adjustment da warehouse header-level
-            items.append({
+            uom = frappe.db.get_value("Item", item_code, "stock_uom") or "Nos"
+
+            item_row = {
                 "item_code": item_code,
-                "warehouse": warehouse_name,
-                "qty": qty,
-                "valuation_rate": valuation_rate if valuation_rate > 0 else 1,
-            })
+                "qty": abs(qty),
+                "uom": uom,
+                "stock_uom": uom,
+                "conversion_factor": 1,
+                "basic_rate": valuation_rate if valuation_rate > 0 else 0,
+                "allow_zero_valuation_rate": 1 if valuation_rate <= 0 else 0,
+            }
 
-        if not items:
+            if qty > 0:
+                # Material Receipt — omborga kirish (t_warehouse)
+                item_row["t_warehouse"] = warehouse_name
+                receipt_items.append(item_row)
+            else:
+                # Material Issue — ombordan chiqish (s_warehouse)
+                item_row["s_warehouse"] = warehouse_name
+                issue_items.append(item_row)
+
+        if not receipt_items and not issue_items:
             return False
 
-        try:
-            doc = frappe.get_doc({
-                "doctype": "Stock Reconciliation",
-                "purpose": "Stock Reconciliation",
-                "company": company,
-                "posting_date": posting_date or frappe.utils.today(),
-                "posting_time": posting_time,
-                "set_posting_time": 1,
-                "custom_ibox_stock_adjustment_id": str(ibox_id),
-                "custom_ibox_client": self.client_name,
-                "items": items,
-            })
-            doc.insert(ignore_permissions=True)
-            return True
+        created = False
 
-        except Exception:
-            frappe.log_error(
-                title=f"Stock Adjustment Upsert Error - {self.client_name}",
-                message=f"ibox_id={ibox_id}\n{frappe.get_traceback()}",
-            )
-            return False
+        # 1) Material Receipt (ortiqcha topilgan mahsulotlar)
+        if receipt_items:
+            try:
+                doc = frappe.get_doc({
+                    "doctype": "Stock Entry",
+                    "stock_entry_type": "Material Receipt",
+                    "company": company,
+                    "posting_date": posting_date,
+                    "posting_time": posting_time,
+                    "set_posting_time": 1,
+                    "custom_ibox_stock_adjustment_id": str(ibox_id),
+                    "custom_ibox_client": self.client_name,
+                    "remarks": f"iBox Inventarizatsiya #{record.get('number', '')} — Ortiqcha (+)",
+                    "items": receipt_items,
+                })
+                doc.insert(ignore_permissions=True)
+                created = True
+            except Exception:
+                frappe.log_error(
+                    title=f"Stock Adjustment Receipt Error - {self.client_name}",
+                    message=f"ibox_id={ibox_id}\n{frappe.get_traceback()}",
+                )
+
+        # 2) Material Issue (kam topilgan mahsulotlar)
+        if issue_items:
+            try:
+                # Agar receipt ham bor bo'lsa, ibox_id ga suffix qo'shamiz
+                adj_id = f"{ibox_id}-issue" if created else str(ibox_id)
+                doc = frappe.get_doc({
+                    "doctype": "Stock Entry",
+                    "stock_entry_type": "Material Issue",
+                    "company": company,
+                    "posting_date": posting_date,
+                    "posting_time": posting_time,
+                    "set_posting_time": 1,
+                    "custom_ibox_stock_adjustment_id": adj_id,
+                    "custom_ibox_client": self.client_name,
+                    "remarks": f"iBox Inventarizatsiya #{record.get('number', '')} — Kamomad (-)",
+                    "items": issue_items,
+                })
+                doc.insert(ignore_permissions=True)
+                created = True
+            except Exception:
+                frappe.log_error(
+                    title=f"Stock Adjustment Issue Error - {self.client_name}",
+                    message=f"ibox_id={ibox_id}\n{frappe.get_traceback()}",
+                )
+
+        return created
 
     def _resolve_warehouse(self, warehouse_id) -> str | None:
         """iBox warehouse_id → ERPNext Warehouse.name"""

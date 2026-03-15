@@ -35,8 +35,6 @@ class IBoxAPIClient:
         self._warehouses = None
         self._purchases = None
         self._shipments = None
-        self._stock_adjustments = None
-        self._transfers = None
         self._salaries = None
         self._currency_exchanges = None
 
@@ -156,22 +154,6 @@ class IBoxAPIClient:
             from erpnext_with_ibox.ibox.api.endpoints.shipments import ShipmentEndpoint
             self._shipments = ShipmentEndpoint(self)
         return self._shipments
-
-    @property
-    def stock_adjustments(self):
-        """Stock Adjustment endpoint handler (lazy-load)."""
-        if self._stock_adjustments is None:
-            from erpnext_with_ibox.ibox.api.endpoints.stock_adjustment import StockAdjustmentEndpoint
-            self._stock_adjustments = StockAdjustmentEndpoint(self)
-        return self._stock_adjustments
-
-    @property
-    def transfers(self):
-        """Transfer endpoint handler (lazy-load)."""
-        if self._transfers is None:
-            from erpnext_with_ibox.ibox.api.endpoints.transfer import TransferEndpoint
-            self._transfers = TransferEndpoint(self)
-        return self._transfers
 
     @property
     def salaries(self):

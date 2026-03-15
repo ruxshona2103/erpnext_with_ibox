@@ -57,6 +57,12 @@ class BaseSyncHandler(ABC):
         self.client_name = client_doc.name
         self.ibox_total = 0  # API dan kelgan umumiy yozuvlar soni
 
+        # ── Pagination & Date Filter — iBox Client dan o'qiladi ───────
+        self.page_size = int(client_doc.get("sync_page_size") or 100)
+        self.max_pages = int(client_doc.get("sync_max_pages") or 0)  # 0 = cheksiz
+        self.sync_from_date = str(client_doc.get("sync_from_date") or "")
+        self.sync_to_date = str(client_doc.get("sync_to_date") or "")
+
         # ── Mirror Sync: API dan kelgan active ID lar to'plami ────────
         self._active_ibox_ids: set = set()
         self._cleanup_result: dict | None = None
@@ -143,6 +149,11 @@ class BaseSyncHandler(ABC):
                         "stopped": True,
                     }
 
+                # ── Date Filter ─────────────────────────────────────
+                if not self._is_in_date_range(record):
+                    processed += 1
+                    continue
+
                 # ── Mirror Sync: Active ID yig'ish ───────────────────
                 record_id = record.get("id")
                 if record_id is not None:
@@ -228,6 +239,30 @@ class BaseSyncHandler(ABC):
         if self._cleanup_result:
             result["cleanup"] = self._cleanup_result
         return result
+
+    # ── Date Filter ──────────────────────────────────────────────────
+
+    def _is_in_date_range(self, record: dict) -> bool:
+        """
+        Record sanasi sync_from_date..sync_to_date oralig'ida ekanligini tekshirish.
+        Sana filtri bo'sh bo'lsa — True (hamma recordlar o'tadi).
+        """
+        if not self.sync_from_date and not self.sync_to_date:
+            return True
+
+        raw_date = record.get("date") or ""
+        if not raw_date:
+            return True  # Sanasi yo'q recordlarni o'tkazib yubormaymiz
+
+        record_date = raw_date[:10]  # "2026-03-15T..." → "2026-03-15"
+        if not record_date or len(record_date) < 10:
+            return True
+
+        if self.sync_from_date and record_date < self.sync_from_date:
+            return False
+        if self.sync_to_date and record_date > self.sync_to_date:
+            return False
+        return True
 
     # ── Stop / Kill Mechanism ─────────────────────────────────────────
 

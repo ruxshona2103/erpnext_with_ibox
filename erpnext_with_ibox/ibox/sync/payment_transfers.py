@@ -14,11 +14,11 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """
-        iBox API dan faqatgina eng oxirgi 2 ta sahifani (maksimal 200 ta ko'chirish) yield qilish.
-        API ga ortiqcha og'irlik tushmasligi uchun limit qat'iy belgilangan.
+        iBox API dan pul ko'chirishlarni yield qilish.
+        page_size va max_pages iBox Client sozlamalaridan olinadi.
         """
-        max_pages = 2
-        per_page = 100
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 2
 
         for page in range(1, max_pages + 1):
             response = self.api.request(
@@ -29,7 +29,7 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
             records = response.get("data", [])
 
             if page == 1:
-                self.ibox_total = min(flt(response.get("total", 0)), max_pages * per_page)
+                self.ibox_total = min(int(flt(response.get("total", 0))), max_pages * per_page)
 
             if not records:
                 break

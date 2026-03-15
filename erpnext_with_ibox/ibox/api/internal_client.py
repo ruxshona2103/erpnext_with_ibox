@@ -180,6 +180,22 @@ class IBoxInternalClient:
             from erpnext_with_ibox.ibox.api.endpoints.cashbox import CashboxEndpoint
             self._cashbox = CashboxEndpoint(self)
         return self._cashbox
+
+    @property
+    def stock_adjustments(self):
+        """Stock Adjustment endpoint handler (lazy-load). /api/document/ — Internal API."""
+        if not hasattr(self, '_stock_adjustments') or self._stock_adjustments is None:
+            from erpnext_with_ibox.ibox.api.endpoints.stock_adjustment import StockAdjustmentEndpoint
+            self._stock_adjustments = StockAdjustmentEndpoint(self)
+        return self._stock_adjustments
+
+    @property
+    def transfers(self):
+        """Transfer endpoint handler (lazy-load). /api/document/ — Internal API."""
+        if not hasattr(self, '_transfers') or self._transfers is None:
+            from erpnext_with_ibox.ibox.api.endpoints.transfer import TransferEndpoint
+            self._transfers = TransferEndpoint(self)
+        return self._transfers
 # ── Convenience Function ──────────────────────────────────────────────────────
 
 def get_internal_session_token(client_doc) -> str:

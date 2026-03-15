@@ -52,10 +52,13 @@ class SalarySyncHandler(BaseSyncHandler):
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox API dan salary recordlarni yield qilish."""
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 2
+
         first_page = self.api.salaries.get_page(page=1, per_page=1)
         self.ibox_total = first_page.get("total", 0)
 
-        for record in self.api.salaries.get_all(per_page=100, max_pages=2):
+        for record in self.api.salaries.get_all(per_page=per_page, max_pages=max_pages):
             yield record
 
     def upsert(self, record: dict) -> bool:
@@ -212,12 +215,7 @@ class SalarySyncHandler(BaseSyncHandler):
 
     def _get_salary_expense_account(self, company) -> str | None:
         """Salary Expense Account topish."""
-        # 1) Company default_expense_account
-        account = frappe.db.get_value("Company", company, "default_expense_account")
-        if account:
-            return account
-
-        # 2) "Salary" yoki "Payroll" nomli expense account
+        # 1) "Salary" nomli expense account — eng to'g'ri
         account = frappe.db.get_value(
             "Account",
             {
@@ -231,25 +229,55 @@ class SalarySyncHandler(BaseSyncHandler):
         if account:
             return account
 
-        # 3) Har qanday expense account
+        # 2) "Payroll" nomli expense account
         account = frappe.db.get_value(
             "Account",
-            {"company": company, "root_type": "Expense", "is_group": 0},
+            {
+                "company": company,
+                "root_type": "Expense",
+                "is_group": 0,
+                "account_name": ["like", "%Payroll%"],
+            },
             "name",
         )
-        return account
-
-    def _get_salary_payable_account(self, currency_code, company) -> str | None:
-        """Salary uchun cash/payable account topish."""
-        if currency_code == "UZS":
-            account = getattr(self.client_doc, "uzs_payable_account", None)
-        else:
-            account = getattr(self.client_doc, "usd_payable_account", None)
-
         if account:
             return account
 
-        return frappe.db.get_value("Company", company, "default_payable_account")
+        # 3) Company default_expense_account (fallback)
+        return frappe.db.get_value("Company", company, "default_expense_account")
+
+    def _get_salary_payable_account(self, currency_code, company) -> str | None:
+        """Salary uchun Cash/Bank account topish (Payable emas!)."""
+        # Company default cash account
+        account = frappe.db.get_value("Company", company, "default_cash_account")
+        if account:
+            return account
+
+        # Bank account
+        account = frappe.db.get_value("Company", company, "default_bank_account")
+        if account:
+            return account
+
+        # Fallback: currency bo'yicha Cash account
+        account = frappe.db.get_value(
+            "Account",
+            {
+                "company": company,
+                "account_type": "Cash",
+                "is_group": 0,
+                "account_currency": currency_code,
+            },
+            "name",
+        )
+        if account:
+            return account
+
+        # Eng oxirgi fallback: har qanday Cash account
+        return frappe.db.get_value(
+            "Account",
+            {"company": company, "account_type": "Cash", "is_group": 0},
+            "name",
+        )
 
     def _get_exchange_rate(self, from_currency, to_currency) -> float:
         """Currency Exchange jadvalidan kurs olish."""

@@ -170,8 +170,8 @@ frappe.ui.form.on("iBox Client", {
             }, __("Actions"));
 
 
-            // ── Chiquvchi To'lovlarni Yuklash (Maks 200 ta) ──
-            frm.add_custom_button(__("Chiquvchi To'lov (200 ta)"), function () {
+            // ── Chiquvchi To'lovlarni Yuklash ──
+            frm.add_custom_button(__("Chiquvchi To'lovlar"), function () {
                 frappe.call({
                     method: "sync_payments_made",
                     doc: frm.doc,
@@ -187,8 +187,8 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
-            // ── Ichki Pul Ko'chirishlarni Yuklash (Maks 200 ta) ──
-            frm.add_custom_button(__("Pul Ko'chirish (200 ta)"), function () {
+            // ── Ichki Pul Ko'chirishlarni Yuklash ──
+            frm.add_custom_button(__("Pul Ko'chirishlar"), function () {
                 frappe.call({
                     method: "sync_payment_transfers",
                     doc: frm.doc,
@@ -285,8 +285,8 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
-            // ── Inventarizatsiya Yuklash (Maks 200 ta) ──
-            frm.add_custom_button(__("Inventarizatsiya (200 ta)"), function () {
+            // ── Inventarizatsiya Yuklash ──
+            frm.add_custom_button(__("Inventarizatsiya"), function () {
                 frappe.call({
                     method: "sync_stock_adjustments",
                     doc: frm.doc,
@@ -303,8 +303,8 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
-            // ── Omborlar arasi Ko'chirish Yuklash (Maks 200 ta) ──
-            frm.add_custom_button(__("Ko'chirish (200 ta)"), function () {
+            // ── Omborlar arasi Ko'chirish Yuklash ──
+            frm.add_custom_button(__("Ko'chirishlar"), function () {
                 frappe.call({
                     method: "sync_transfers",
                     doc: frm.doc,
@@ -321,8 +321,8 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
-            // ── Oylik Maosh Yuklash (Maks 200 ta) ──
-            frm.add_custom_button(__("Oylik Maosh (200 ta)"), function () {
+            // ── Oylik Maosh Yuklash ──
+            frm.add_custom_button(__("Oylik Maoshlar"), function () {
                 frappe.call({
                     method: "sync_salaries",
                     doc: frm.doc,
@@ -339,8 +339,8 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
-            // ── Valyuta Ayirboshlash Yuklash (Maks 200 ta) ──
-            frm.add_custom_button(__("Valyuta Ayirboshlash (200 ta)"), function () {
+            // ── Valyuta Ayirboshlash Yuklash ──
+            frm.add_custom_button(__("Valyuta Ayirboshlash"), function () {
                 frappe.call({
                     method: "sync_currency_exchanges",
                     doc: frm.doc,

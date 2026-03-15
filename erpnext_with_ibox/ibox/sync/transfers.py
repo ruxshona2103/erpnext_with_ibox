@@ -39,28 +39,33 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 class TransferSyncHandler(BaseSyncHandler):
     DOCTYPE = "Stock Entry"
     NAME = "Transfers (Omborlar arasi ko'chirish)"
+    NEEDS_INTERNAL_API = True
 
     IBOX_ID_FIELD = "custom_ibox_transfer_id"
 
+    def __init__(self, api_client, client_doc, internal_api=None):
+        super().__init__(api_client, client_doc)
+        self.internal_api = internal_api
+
     def fetch_data(self) -> Generator[dict, None, None]:
         """
-        iBox API dan transfer recordlarni yield qilish.
+        iBox Internal API dan transfer recordlarni yield qilish.
 
         List API dan warehouse_from/warehouse_to nomlarini olib,
         detail record ga qo'shib yuboramiz.
         """
-        max_pages = 2
-        per_page = 100
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 2
         page = 1
 
-        first_page = self.api.transfers.get_page(page=1, per_page=1)
+        first_page = self.internal_api.transfers.get_page(page=1, per_page=1)
         self.ibox_total = first_page.get("total", 0)
 
         import time
         from erpnext_with_ibox.ibox.config import API_PAGE_DELAY
 
         while page <= max_pages:
-            response = self.api.transfers.get_page(page=page, per_page=per_page)
+            response = self.internal_api.transfers.get_page(page=page, per_page=per_page)
             records = response.get("data", [])
 
             if not records:
@@ -76,7 +81,7 @@ class TransferSyncHandler(BaseSyncHandler):
                 wh_to_name = record.get("warehouse_to")
 
                 try:
-                    detail = self.api.transfers.get_detail(record_id)
+                    detail = self.internal_api.transfers.get_detail(record_id)
                     # Warehouse nomlarini detail ga qo'shish
                     detail["_warehouse_from_name"] = wh_from_name
                     detail["_warehouse_to_name"] = wh_to_name
@@ -179,7 +184,8 @@ class TransferSyncHandler(BaseSyncHandler):
                 "conversion_factor": 1,
                 "s_warehouse": source_warehouse,
                 "t_warehouse": target_warehouse,
-                "basic_rate": basic_rate if basic_rate > 0 else None,
+                "basic_rate": basic_rate if basic_rate > 0 else 0,
+                "allow_zero_valuation_rate": 1 if basic_rate <= 0 else 0,
             })
 
         if not items:

@@ -47,10 +47,13 @@ class CurrencyExchangeSyncHandler(BaseSyncHandler):
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox API dan currency exchange recordlarni yield qilish."""
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 2
+
         first_page = self.api.currency_exchanges.get_page(page=1, per_page=1)
         self.ibox_total = first_page.get("total", 0)
 
-        for record in self.api.currency_exchanges.get_all(per_page=100, max_pages=2):
+        for record in self.api.currency_exchanges.get_all(per_page=per_page, max_pages=max_pages):
             yield record
 
     def upsert(self, record: dict) -> bool:
@@ -90,9 +93,10 @@ class CurrencyExchangeSyncHandler(BaseSyncHandler):
         if from_amount <= 0 or to_amount <= 0:
             return False
 
-        # Account topish — valyutaga mos
-        from_account = self._get_account_for_currency(from_currency, company)
-        to_account = self._get_account_for_currency(to_currency, company)
+        # Account topish — cashbox + valyutaga mos
+        cashbox_id = str(record.get("cashbox_id") or "")
+        from_account = self._get_account_for_currency(from_currency, company, cashbox_id)
+        to_account = self._get_account_for_currency(to_currency, company, cashbox_id)
 
         if not from_account or not to_account:
             frappe.log_error(
@@ -141,41 +145,25 @@ class CurrencyExchangeSyncHandler(BaseSyncHandler):
             )
             return False
 
-    def _get_account_for_currency(self, currency_code: str, company: str) -> str | None:
-        """Valyutaga mos cash/bank account topish."""
-        # 1) iBox Client dagi payable account (valyutaga mos)
-        if currency_code == "UZS":
-            account = getattr(self.client_doc, "uzs_payable_account", None)
-        else:
-            account = getattr(self.client_doc, "usd_payable_account", None)
+    def _get_account_for_currency(self, currency_code: str, company: str, cashbox_id: str = "") -> str | None:
+        """Cashbox mapping dan valyutaga mos account topish."""
+        # 1) Cashbox mapping dan account topish
+        if cashbox_id:
+            for row in self.client_doc.get("cashboxes") or []:
+                if str(row.cashbox_id) == cashbox_id:
+                    if currency_code == "UZS" and row.uzs_account:
+                        return row.uzs_account
+                    elif currency_code != "UZS" and row.usd_account:
+                        return row.usd_account
+                    break
 
-        if account:
-            # Account valyutasi mos kelishini tekshirish
-            acct_currency = frappe.db.get_value("Account", account, "account_currency")
-            if acct_currency == currency_code:
-                return account
-
-        # 2) Cash account — valyutaga mos
+        # 2) Fallback: har qanday Cash account — valyutaga mos
         account = frappe.db.get_value(
             "Account",
             {
                 "company": company,
                 "account_currency": currency_code,
                 "account_type": "Cash",
-                "is_group": 0,
-            },
-            "name",
-        )
-        if account:
-            return account
-
-        # 3) Bank account — valyutaga mos
-        account = frappe.db.get_value(
-            "Account",
-            {
-                "company": company,
-                "account_currency": currency_code,
-                "account_type": "Bank",
                 "is_group": 0,
             },
             "name",

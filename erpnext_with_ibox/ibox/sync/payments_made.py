@@ -14,11 +14,11 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """
-        iBox API dan faqatgina eng oxirgi 2 ta sahifani (maksimal 200 ta to'lov) yield qilish.
-        API ga ortiqcha og'irlik tushmasligi uchun limit qat'iy belgilangan.
+        iBox API dan to'lovlarni yield qilish.
+        page_size va max_pages iBox Client sozlamalaridan olinadi.
         """
-        max_pages = 2
-        per_page = 100
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 2
 
         for page in range(1, max_pages + 1):
             response = self.api.request(
