@@ -56,12 +56,12 @@ SYNC_HANDLERS = {
     "exchange_rates":   ExchangeRateSyncHandler,     # valyuta kurslari
     "payments":            PaymentSyncHandler,              # to'lovlar (kiruvchi)
     "sales":               SalesSyncHandler,                # sotuvlar (otgruzki)
-    "payments_made":       PaymentMadeSyncHandler,          # chiquvchi to'lovlar (200 ta limit)
-    "payment_transfers":   PaymentTransferSyncHandler,     # ichki pul ko'chirishlar (200 ta limit)
-    "stock_adjustments":   StockAdjustmentSyncHandler,     # inventarizatsiya (200 ta limit)
-    "transfers":           TransferSyncHandler,            # omborlar arasi ko'chirish (200 ta limit)
-    "salaries":            SalarySyncHandler,              # oylik maoshlar (200 ta limit)
-    "currency_exchanges":  CurrencyExchangeSyncHandler,    # valyuta ayirboshlash (200 ta limit)
+    "payments_made":       PaymentMadeSyncHandler,          # chiquvchi to'lovlar
+    "payment_transfers":   PaymentTransferSyncHandler,     # ichki pul ko'chirishlar
+    "stock_adjustments":   StockAdjustmentSyncHandler,     # inventarizatsiya
+    "transfers":           TransferSyncHandler,            # omborlar arasi ko'chirish
+    "salaries":            SalarySyncHandler,              # oylik maoshlar
+    "currency_exchanges":  CurrencyExchangeSyncHandler,    # valyuta ayirboshlash
 }
 
 # Master sync ketma-ketligi — "Sync Now" uchun majburiy tartib.

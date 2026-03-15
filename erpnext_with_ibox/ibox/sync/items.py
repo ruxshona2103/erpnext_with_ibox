@@ -18,6 +18,7 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 class ItemSyncHandler(BaseSyncHandler):
     DOCTYPE = "Item"
     NAME = "Mahsulotlar"
+    IBOX_ID_FIELD = "custom_ibox_id"
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox directory API dan mahsulotlarni yield qilish + total ni saqlash."""

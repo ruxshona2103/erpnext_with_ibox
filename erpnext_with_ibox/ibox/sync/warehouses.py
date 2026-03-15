@@ -15,6 +15,7 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 class WarehouseSyncHandler(BaseSyncHandler):
     DOCTYPE = "Warehouse"
     NAME = "Omborlar"
+    IBOX_ID_FIELD = "custom_ibox_warehouse_id"
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox omborlarni yield + total saqlash."""

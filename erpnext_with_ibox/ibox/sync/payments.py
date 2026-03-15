@@ -13,6 +13,7 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 class PaymentSyncHandler(BaseSyncHandler):
     DOCTYPE = "Payment Entry"
     NAME = "Payments"
+    IBOX_ID_FIELD = "custom_ibox_payment_id"
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox API dan barcha to'lovlarni sahifa-sahifa yield qilish."""
@@ -202,7 +203,7 @@ class PaymentSyncHandler(BaseSyncHandler):
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
-        return f"iBox - {cashbox_name} ({currency})"
+        return f"iBox Kassa - {cashbox_name} ({currency})"
 
     def _get_receivable_account(self) -> str:
         """

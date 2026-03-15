@@ -40,7 +40,6 @@ INTERNAL_TOKEN_TTL = 18000  # 5 soat (sekundlarda)
 PAGE_SIZE = 1000           # Har bir Directory API sahifadagi yozuvlar soni
 INTERNAL_PAGE_SIZE = 100   # Internal API uchun (iBox max 100 qabul qiladi)
 BATCH_COMMIT_SIZE = 50     # frappe.db.commit() har N ta upsertdan keyin
-PROGRESS_LOG_SIZE = 1000   # sync_status yangilash oralig'i
 
 # -- API Rate Limiting & Retry --
 API_RETRY_COUNT = 5           # 429 xatoda necha marta qayta urinish

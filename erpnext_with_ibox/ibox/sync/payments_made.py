@@ -11,6 +11,7 @@ from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 class PaymentMadeSyncHandler(BaseSyncHandler):
     DOCTYPE = "Payment Entry"
     NAME = "Payments Made (Chiquvchi To'lovlar)"
+    IBOX_ID_FIELD = "custom_ibox_payment_id"
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """
@@ -27,6 +28,12 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
                 params={"page": page, "per_page": per_page}
             )
             records = response.get("data", [])
+
+            if page == 1:
+                self.ibox_total = min(
+                    int(flt(response.get("total", 0))),
+                    max_pages * per_page,
+                )
 
             if not records:
                 break
@@ -288,7 +295,7 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
-        return f"iBox - {cashbox_name} ({currency})"
+        return f"iBox Kassa - {cashbox_name} ({currency})"
 
     def _get_cashbox_account(self, mode_of_payment: str, currency: str) -> str:
         """Kassani (paid_from_account) hisobiga erishish."""

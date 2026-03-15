@@ -173,6 +173,11 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
 
         created = False
 
+        # Orphan Cleanup uchun: agar issue_items bor bo'lsa, "{id}-issue" ni ham active ID ga qo'shish
+        # (base.run() faqat "{id}" qo'shadi, lekin biz 2 ta Stock Entry yaratamiz)
+        if issue_items and receipt_items:
+            self._active_ibox_ids.add(f"{ibox_id}-issue")
+
         # 1) Material Receipt (ortiqcha topilgan mahsulotlar)
         if receipt_items:
             try:

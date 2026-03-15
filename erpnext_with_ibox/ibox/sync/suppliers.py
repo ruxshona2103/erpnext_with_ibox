@@ -18,6 +18,7 @@ class SupplierSyncHandler(BaseSyncHandler):
     DOCTYPE = "Supplier"
     NAME = "Suppliers"
     NEEDS_INTERNAL_API = True
+    IBOX_ID_FIELD = "custom_ibox_id"
 
     def __init__(self, api_client, client_doc, internal_api=None):
         super().__init__(api_client, client_doc)
