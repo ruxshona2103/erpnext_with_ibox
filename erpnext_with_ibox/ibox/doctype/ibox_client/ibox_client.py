@@ -212,6 +212,50 @@ class iBoxClient(Document):
             frappe.throw(f"Kassalarni tortishda xatolik yuz berdi: {str(e)[:200]}")
 
     @frappe.whitelist()
+    def sync_stock_adjustments(self):
+        """Inventarizatsiya hujjatlarini sync qilish (maks. 200ta, background job)."""
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["stock_adjustments"],
+        )
+        return {"message": "Inventarizatsiya sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    @frappe.whitelist()
+    def sync_transfers(self):
+        """Omborlar arasi ko'chirishlarni sync qilish (maks. 200ta, background job)."""
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["transfers"],
+        )
+        return {"message": "Omborlar arasi ko'chirish sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    @frappe.whitelist()
+    def sync_salaries(self):
+        """Oylik maoshlarni sync qilish (maks. 200ta, background job)."""
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["salaries"],
+        )
+        return {"message": "Oylik maoshlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    @frappe.whitelist()
+    def sync_currency_exchanges(self):
+        """Valyuta ayirboshlash hujjatlarini sync qilish (maks. 200ta, background job)."""
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["currency_exchanges"],
+        )
+        return {"message": "Valyuta ayirboshlash sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    @frappe.whitelist()
     def sync_sales(self):
         self._prepare_for_sync()
         frappe.enqueue(

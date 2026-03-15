@@ -31,8 +31,12 @@ _MODULE_LABELS = {
     "purchases_only":  "Xaridlar",
     "returns_only":    "Vozvratlar",
     "exchange_rates":  "Valyuta kurslari",
-    "sales":           "Sotuvlar (Otgruzki)",
-    "payment_transfers": "Pul ko'chirishlar",
+    "sales":              "Sotuvlar (Otgruzki)",
+    "payment_transfers":  "Pul ko'chirishlar",
+    "stock_adjustments":  "Inventarizatsiya",
+    "transfers":          "Omborlar arasi ko'chirish",
+    "salaries":           "Oylik maoshlar",
+    "currency_exchanges": "Valyuta ayirboshlash",
 }
 
 # Stagger delay — har bir client orasidagi kutish (sekundlarda)

@@ -35,6 +35,10 @@ class IBoxAPIClient:
         self._warehouses = None
         self._purchases = None
         self._shipments = None
+        self._stock_adjustments = None
+        self._transfers = None
+        self._salaries = None
+        self._currency_exchanges = None
 
     def _get_headers(self) -> dict:
         return {
@@ -152,4 +156,36 @@ class IBoxAPIClient:
             from erpnext_with_ibox.ibox.api.endpoints.shipments import ShipmentEndpoint
             self._shipments = ShipmentEndpoint(self)
         return self._shipments
+
+    @property
+    def stock_adjustments(self):
+        """Stock Adjustment endpoint handler (lazy-load)."""
+        if self._stock_adjustments is None:
+            from erpnext_with_ibox.ibox.api.endpoints.stock_adjustment import StockAdjustmentEndpoint
+            self._stock_adjustments = StockAdjustmentEndpoint(self)
+        return self._stock_adjustments
+
+    @property
+    def transfers(self):
+        """Transfer endpoint handler (lazy-load)."""
+        if self._transfers is None:
+            from erpnext_with_ibox.ibox.api.endpoints.transfer import TransferEndpoint
+            self._transfers = TransferEndpoint(self)
+        return self._transfers
+
+    @property
+    def salaries(self):
+        """Salary endpoint handler (lazy-load)."""
+        if self._salaries is None:
+            from erpnext_with_ibox.ibox.api.endpoints.salary import SalaryEndpoint
+            self._salaries = SalaryEndpoint(self)
+        return self._salaries
+
+    @property
+    def currency_exchanges(self):
+        """Currency Exchange endpoint handler (lazy-load)."""
+        if self._currency_exchanges is None:
+            from erpnext_with_ibox.ibox.api.endpoints.currency_exchange import CurrencyExchangeEndpoint
+            self._currency_exchanges = CurrencyExchangeEndpoint(self)
+        return self._currency_exchanges
 

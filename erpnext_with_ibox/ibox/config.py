@@ -60,3 +60,9 @@ SYNC_TIMEOUT = 10800       # 3 soat har bir job uchun
 SLUG_PAYMENTS = "/api/integration/document/payment-received/list"
 SLUG_PAYMENTS_MADE = "/api/integration/document/payment-made/list"
 SLUG_PAYMENT_TRANSFERS = "/api/integration/document/payment-transfer/list"
+
+# -- New Document Endpoints --
+STOCK_ADJUSTMENT_ENDPOINT = "/api/document/stock-adjustment"
+TRANSFER_ENDPOINT = "/api/document/transfer"
+SALARY_ENDPOINT = "/api/integration/document/salary/list"
+CURRENCY_EXCHANGE_ENDPOINT = "/api/integration/document/currency-exchange/list"

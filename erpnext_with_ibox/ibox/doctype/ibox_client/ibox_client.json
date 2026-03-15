@@ -32,7 +32,13 @@
         "usd_receivable_account",
         "column_break_sales_income",
         "uzs_sales_income",
-        "usd_sales_income"
+        "usd_sales_income",
+        "sync_settings_section",
+        "sync_from_date",
+        "sync_to_date",
+        "column_break_sync_settings",
+        "sync_page_size",
+        "sync_max_pages"
     ],
     "fields": [
         {
@@ -193,11 +199,46 @@
             "fieldtype": "Link",
             "label": "USD Sales Income Account",
             "options": "Account"
+        },
+        {
+            "fieldname": "sync_settings_section",
+            "fieldtype": "Section Break",
+            "label": "Sync Settings"
+        },
+        {
+            "description": "Sync uchun boshlanish sanasi. Bo'sh bo'lsa — hamma datalarni tortadi.",
+            "fieldname": "sync_from_date",
+            "fieldtype": "Date",
+            "label": "Sync From Date"
+        },
+        {
+            "description": "Sync uchun tugash sanasi. Bo'sh bo'lsa — bugungi sanagacha tortadi.",
+            "fieldname": "sync_to_date",
+            "fieldtype": "Date",
+            "label": "Sync To Date"
+        },
+        {
+            "fieldname": "column_break_sync_settings",
+            "fieldtype": "Column Break"
+        },
+        {
+            "default": "100",
+            "description": "Har bir sahifada nechta record tortish (maks 100).",
+            "fieldname": "sync_page_size",
+            "fieldtype": "Int",
+            "label": "Page Size"
+        },
+        {
+            "default": "2",
+            "description": "Nechta sahifa tortish. 2 sahifa = 200 ta record.",
+            "fieldname": "sync_max_pages",
+            "fieldtype": "Int",
+            "label": "Max Pages"
         }
     ],
     "index_web_pages_for_search": 1,
     "links": [],
-    "modified": "2026-03-07 10:32:00.000000",
+    "modified": "2026-03-15 15:00:00.000000",
     "modified_by": "Administrator",
     "module": "ibox",
     "name": "iBox Client",

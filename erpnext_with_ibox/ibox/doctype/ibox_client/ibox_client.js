@@ -5,6 +5,31 @@ frappe.ui.form.on("iBox Client", {
     refresh(frm) {
         if (!frm.is_new()) {
 
+            // ── Quick Date Buttons ────────────────────────────────────
+            frm.add_custom_button(__("1 Oy"), function () {
+                _set_date_range(frm, 1);
+            }, __("Muddat"));
+
+            frm.add_custom_button(__("3 Oy"), function () {
+                _set_date_range(frm, 3);
+            }, __("Muddat"));
+
+            frm.add_custom_button(__("6 Oy"), function () {
+                _set_date_range(frm, 6);
+            }, __("Muddat"));
+
+            frm.add_custom_button(__("1 Yil"), function () {
+                _set_date_range(frm, 12);
+            }, __("Muddat"));
+
+            frm.add_custom_button(__("Hammasi"), function () {
+                frm.set_value("sync_from_date", "");
+                frm.set_value("sync_to_date", "");
+                frm.dirty();
+                frm.save();
+                frappe.show_alert({message: __("Sana filtri tozalandi — hamma datalar tortiladi"), indicator: "blue"});
+            }, __("Muddat"));
+
             // ── Test Connection ───────────────────────────────────────
             frm.add_custom_button(__("Test Connection"), function () {
                 frappe.call({
@@ -260,6 +285,78 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
+            // ── Inventarizatsiya Yuklash (Maks 200 ta) ──
+            frm.add_custom_button(__("Inventarizatsiya (200 ta)"), function () {
+                frappe.call({
+                    method: "sync_stock_adjustments",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Inventarizatsiya yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    }
+                });
+            }, __("Actions"));
+
+            // ── Omborlar arasi Ko'chirish Yuklash (Maks 200 ta) ──
+            frm.add_custom_button(__("Ko'chirish (200 ta)"), function () {
+                frappe.call({
+                    method: "sync_transfers",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Omborlar arasi ko'chirishlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    }
+                });
+            }, __("Actions"));
+
+            // ── Oylik Maosh Yuklash (Maks 200 ta) ──
+            frm.add_custom_button(__("Oylik Maosh (200 ta)"), function () {
+                frappe.call({
+                    method: "sync_salaries",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Oylik maoshlar yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    }
+                });
+            }, __("Actions"));
+
+            // ── Valyuta Ayirboshlash Yuklash (Maks 200 ta) ──
+            frm.add_custom_button(__("Valyuta Ayirboshlash (200 ta)"), function () {
+                frappe.call({
+                    method: "sync_currency_exchanges",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: __("Valyuta ayirboshlash yuklanmoqda..."),
+                    callback: function (r) {
+                        frappe.msgprint({
+                            title: __("Sync Started"),
+                            indicator: "blue",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    }
+                });
+            }, __("Actions"));
+
             // ── Sotuvlarni Yuklash ───────────────────────────────────
             frm.add_custom_button(__("Sotuvlarni Yuklash"), function () {
                 frappe.call({
@@ -304,3 +401,16 @@ frappe.ui.form.on("iBox Client", {
         }
     }
 });
+
+function _set_date_range(frm, months) {
+    let to_date = frappe.datetime.get_today();
+    let from_date = frappe.datetime.add_months(to_date, -months);
+    frm.set_value("sync_from_date", from_date);
+    frm.set_value("sync_to_date", to_date);
+    frm.dirty();
+    frm.save();
+    frappe.show_alert({
+        message: __("Oxirgi {0} oylik data tortiladi", [months]),
+        indicator: "blue"
+    });
+}
