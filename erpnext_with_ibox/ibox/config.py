@@ -16,6 +16,8 @@ PURCHASE_RETURN_ENDPOINT = "/api/integration/document/supplier-return/list"
 PURCHASE_PAGE_SIZE = 100   # Xarid/vozvrat sahifada yozuvlar soni
 SHIPMENT_ENDPOINT = "/api/integration/document/shipment/list"
 SHIPMENT_PAGE_SIZE = 100   # Sotuv sahifada yozuvlar soni
+SALES_RETURN_ENDPOINT = "/api/integration/document/return/list"
+SALES_RETURN_PAGE_SIZE = 100   # Sales Return sahifada yozuvlar soni (qat'iy max 100)
 
 # -- IBOX Endpoints (endpoint path dict) --
 IBOX_ENDPOINTS = {

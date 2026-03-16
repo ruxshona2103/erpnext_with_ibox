@@ -76,8 +76,8 @@ class SalesSyncHandler(BaseSyncHandler):
     # Mirror Sync: iBox ID field nomi (deduplication va cleanup uchun)
     IBOX_ID_FIELD = "custom_ibox_sales_id"
 
-    def __init__(self, api_client, client_doc):
-        super().__init__(api_client, client_doc)
+    def __init__(self, api_client, client_doc, is_cleanup_job=False):
+        super().__init__(api_client, client_doc, is_cleanup_job=is_cleanup_job)
         # Per-sync-run cache: {"2026-01-31_USD": 12900.0}
         self._rate_cache: dict[str, float] = {}
 
@@ -355,7 +355,7 @@ class SalesSyncHandler(BaseSyncHandler):
         #   4. calculate_taxes_and_totals()
 
         # ── STEP 1: Initialize + Identity ─────────────────────────────
-        #   STOCK-AWARE DRAFT — ombor kamayishi MAJBURIY (update_stock=1).
+        #   Shipment Draft holatida update_stock=0 (stock entry yo'q).
         #   docstatus=0 → hujjat DOIM Draft, submit() hech qachon chaqirilmaydi.
         si = frappe.new_doc("Sales Invoice")
         si.customer             = customer_name
@@ -363,7 +363,7 @@ class SalesSyncHandler(BaseSyncHandler):
         si.posting_date         = posting_date
         si.posting_time         = posting_time
         si.set_posting_time     = 1
-        si.update_stock         = 1   # ✅ Stock Ledger uchun MAJBURIY
+        si.update_stock         = 0   # ✅ Shipment Draft uchun stock harakat yo'q
         si.docstatus            = 0   # DOIM Draft (submit() chaqirilmaydi)
         si.custom_ibox_sales_id = ibox_id
         si.custom_ibox_client   = self.client_name
@@ -372,15 +372,24 @@ class SalesSyncHandler(BaseSyncHandler):
         for item_row in items:
             si.append("items", item_row)
 
-        # ── STEP 2: ERPNext defaults (set_missing_values — Step 4 da qayta chaqiriladi) ──
+        # ── STEP 2: ERPNext defaults (AVVAL chaqiriladi) ──
+        from unittest.mock import patch
+
+        effective_conversion_rate = 1.0 if currency == "UZS" else conversion_rate
+
+        with patch(
+            "erpnext.controllers.accounts_controller.get_exchange_rate",
+            return_value=effective_conversion_rate,
+        ):
+            si.set_missing_values()
 
         # ── STEP 3: THE OVERWRITE (iBox — YAKUNIY SO'Z) ──────────────
         si.currency             = currency
         si.price_list_currency  = currency
         si.selling_price_list   = "Standard Selling"
         si.debit_to             = debit_to
-        si.conversion_rate      = conversion_rate
-        si.plc_conversion_rate  = conversion_rate
+        si.conversion_rate      = effective_conversion_rate
+        si.plc_conversion_rate  = effective_conversion_rate
         si.set_warehouse        = header_warehouse_name
         si.taxes_and_charges    = ""   # Tax yo'q — iBox narxlari final
 
@@ -389,29 +398,28 @@ class SalesSyncHandler(BaseSyncHandler):
 
         # ── STEP 4: Recalculate ──────────────────────────────────────
         # set_missing_values() update_stock ni qayta yozgan bo'lishi mumkin — qayta ta'kidlash
-        si.update_stock         = 1
-        si.set_missing_values()
+        si.update_stock         = 0
         si.calculate_taxes_and_totals()
 
         # ── STEP 5: Rounding Adjustment (iBox total = ERPNext total) ──
         if flt(ibox_total) > 0:
             erp_grand = flt(getattr(si, "grand_total", 0))
             diff = flt(ibox_total) - erp_grand
-            if abs(diff) > 0.001:
+            tolerance = 5.0 if currency == "UZS" else 0.001
+            if abs(diff) > tolerance:
                 si.rounding_adjustment = diff
                 si.rounded_total = flt(ibox_total)
-                si.base_rounding_adjustment = flt(diff * conversion_rate)
-                si.base_rounded_total = flt(ibox_total * conversion_rate)
+                si.base_rounding_adjustment = flt(diff * effective_conversion_rate)
+                si.base_rounded_total = flt(ibox_total * effective_conversion_rate)
 
         # ── STEP 6: Insert as DRAFT + Deadlock Retry ─────────────────
-        from unittest.mock import patch
         import time
 
         for attempt in range(2):  # Max 2 urinish (original + 1 retry)
             try:
                 with patch(
                         "erpnext.controllers.accounts_controller.get_exchange_rate",
-                        return_value=conversion_rate,
+                    return_value=effective_conversion_rate,
                 ):
                     si.insert(ignore_permissions=True)
                 return True  # Muvaffaqiyatli

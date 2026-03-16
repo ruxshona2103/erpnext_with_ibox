@@ -55,6 +55,42 @@ frappe.ui.form.on("iBox Client", {
                 });
             });
 
+            // ── Force Clear Locks (Sinxronizatsiyani To'xtatish) ──────
+            frm.add_custom_button(__("Sinxronizatsiyani To'xtatish"), function () {
+                frappe.confirm(
+                    __(
+                        "OGOHLANTIRISH: Bu sync qulflarini majburan tozalaydi.\n\n" +
+                        "Agar sync to'xtab qolgan bo'lsa (crashed job), " +
+                        "bu tugma uning qulflini ocharadi.\n\n" +
+                        "Davom etishni xohlaysizmi?"
+                    ),
+                    function () {
+                        frappe.call({
+                            method: "force_clear_locks",
+                            doc: frm.doc,
+                            freeze: true,
+                            freeze_message: __("Qulflar tozalanmoqda..."),
+                            callback: function (r) {
+                                if (r.message && r.message.success) {
+                                    frappe.msgprint({
+                                        title: __("Qulflar Tozalandi"),
+                                        indicator: "green",
+                                        message: r.message.message
+                                    });
+                                    frm.reload_doc();
+                                } else {
+                                    frappe.msgprint({
+                                        title: __("Xatolik"),
+                                        indicator: "red",
+                                        message: (r.message && r.message.message) || __("Noma'lum xatolik")
+                                    });
+                                }
+                            }
+                        });
+                    }
+                );
+            }, __("Admin"));
+
             // ── Sync Now (To'liq Master Sinxronizatsiya) ──────────────
             frm.add_custom_button(__("Sync Now"), function () {
                 frappe.confirm(
@@ -205,13 +241,13 @@ frappe.ui.form.on("iBox Client", {
             }, __("Actions"));
 
 
-            // ── Vozvratlarni Yuklash (faqat vozvrat, xarid emas) ─────
-            frm.add_custom_button(__("Vozvratlarni Yuklash"), function () {
+            // ── Taminotchi Vozvratlarini Yuklash (Purchase Return) ─────
+            frm.add_custom_button(__("Taminotchi Vozvratlarini Yuklash"), function () {
                 frappe.call({
                     method: "sync_returns",
                     doc: frm.doc,
                     freeze: true,
-                    freeze_message: __("Vozvratlar yuklanmoqda..."),
+                    freeze_message: __("Taminotchi vozvratlari yuklanmoqda..."),
                     callback: function (r) {
                         frappe.msgprint({
                             title: __("Sync Started"),
@@ -220,6 +256,31 @@ frappe.ui.form.on("iBox Client", {
                         });
                     }
                 });
+            }, __("Actions"));
+
+            // ── Sotuv Vozvratlarini Yuklash (Sales Return) ───────────
+            frm.add_custom_button(__("Sotuv Vozvratlarini Yuklash"), function () {
+                const run_sales_returns_sync = function () {
+                    frappe.call({
+                        method: "sync_sales_returns",
+                        doc: frm.doc,
+                        freeze: true,
+                        freeze_message: __("Sotuv vozvratlari yuklanmoqda..."),
+                        callback: function (r) {
+                            frappe.msgprint({
+                                title: __("Sync Started"),
+                                indicator: "blue",
+                                message: r.message.message
+                            });
+                        }
+                    });
+                };
+
+                if (frm.is_dirty()) {
+                    frm.save().then(() => run_sales_returns_sync());
+                } else {
+                    run_sales_returns_sync();
+                }
             }, __("Actions"));
 
             // ── Valyuta Kurslarini Yuklash ───────────────────────────

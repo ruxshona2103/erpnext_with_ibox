@@ -37,6 +37,7 @@ class IBoxAPIClient:
         self._shipments = None
         self._salaries = None
         self._currency_exchanges = None
+        self._sales_returns = None
 
     def _get_headers(self) -> dict:
         return {
@@ -170,4 +171,12 @@ class IBoxAPIClient:
             from erpnext_with_ibox.ibox.api.endpoints.currency_exchange import CurrencyExchangeEndpoint
             self._currency_exchanges = CurrencyExchangeEndpoint(self)
         return self._currency_exchanges
+
+    @property
+    def sales_returns(self):
+        """Sales Return endpoint handler (lazy-load)."""
+        if self._sales_returns is None:
+            from erpnext_with_ibox.ibox.api.endpoints.sales_returns import SalesReturnsEndpoint
+            self._sales_returns = SalesReturnsEndpoint(self)
+        return self._sales_returns
 

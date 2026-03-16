@@ -32,6 +32,7 @@ _MODULE_LABELS = {
     "returns_only":    "Vozvratlar",
     "exchange_rates":  "Valyuta kurslari",
     "sales":              "Sotuvlar (Otgruzki)",
+    "sales_returns":      "Sotuv vozvratlari",
     "payment_transfers":  "Pul ko'chirishlar",
     "stock_adjustments":  "Inventarizatsiya",
     "transfers":          "Omborlar arasi ko'chirish",
@@ -74,7 +75,7 @@ def sync_all_clients():
             time.sleep(CLIENT_STAGGER_DELAY)
 
 
-def sync_client(client_name: str, handler_names: list = None):
+def sync_client(client_name: str, handler_names: list = None, is_cleanup_job: bool = False):
     """
     Bitta iBox Client uchun sync handlerlarni to'g'ri ketma-ketlikda ishga tushirish.
 
@@ -82,12 +83,18 @@ def sync_client(client_name: str, handler_names: list = None):
         client_name:   iBox Client document nomi
         handler_names: Ishga tushiriladigan handler kalitlari ro'yxati.
                        None bo'lsa — MASTER_SYNC_ORDER ishlatiladi.
+        is_cleanup_job: True bo'lsa — cleanup logic barcha handlerlar uchun ishlatiladi.
+                       False (default) bo'lsa — cleanup faqat Full Sync (handler_names=None) 
+                       uchun ishga tushadi. Bu PARTIAL SYNCS (sync_customers, sync_items) 
+                       uchun cleanup-ni disabled qiladi (xavfsizlik uchun).
     """
     from erpnext_with_ibox.ibox.sync import SYNC_HANDLERS, MASTER_SYNC_ORDER
     from erpnext_with_ibox.ibox.api import IBoxAPIClient
 
     client_doc = frappe.get_doc("iBox Client", client_name)
     api = IBoxAPIClient(client_name)
+
+    is_full_sync = handler_names is None
 
     if handler_names is None:
         handler_names = MASTER_SYNC_ORDER
@@ -96,11 +103,39 @@ def sync_client(client_name: str, handler_names: list = None):
     all_results = {}
 
     # Stop flag va lock tozalash — yangi sync boshlanayotganda eski sarqitlar to'sqinlik qilmasligi uchun
-    frappe.cache().delete_value(f"ibox_sync_lock_{client_name}")
+    # CRITICAL: Agar lock 2+ soat qo'lda qolgan bo'lsa (crashed job) — uni avtomatik tozalash
+    lock_key = f"ibox_sync_lock_{client_name}"
+    lock_age_key = f"ibox_sync_lock_time_{client_name}"
     
+    current_lock = frappe.cache().get_value(lock_key)
+    if current_lock:
+        # Lock borligini tekshirish va yoshi
+        import time as time_module
+        lock_set_time = frappe.cache().get_value(lock_age_key)
+        if lock_set_time:
+            try:
+                lock_age_seconds = time_module.time() - float(lock_set_time)
+                if lock_age_seconds > 7200:  # 2+ soat
+                    frappe.log_error(
+                        title=f"Auto-cleared aged lock - {client_name}",
+                        message=f"Lock age: {lock_age_seconds/3600:.1f} hours. Automatic cleanup triggered."
+                    )
+                    frappe.cache().delete_value(lock_key)
+                    frappe.cache().delete_value(lock_age_key)
+            except Exception:
+                pass
+    
+    frappe.cache().delete_value(f"ibox_sync_stop_{client_name}")
+    
+    frappe.cache().set_value(
+        f"ibox_sync_full_{client_name}",
+        1 if is_full_sync else 0,
+        expires_in_sec=SYNC_TIMEOUT,
+    )
+
     # Partial synclarda to'xtab qolmasligi uchun (agar kimdir partial bosgan bo'lsa),
     # ba'zi joylarda faqat To'liq syncdagina tozalang deb berilgan edi. Biz ikkalasining yaxshi xususiyatini olamiz:
-    if handler_names is None:
+    if is_full_sync:
         frappe.cache().delete_value(f"ibox_sync_stop_{client_name}")
         _set_status(client_name, "To'liq sinxronizatsiya boshlandi...")
     else:
@@ -112,6 +147,7 @@ def sync_client(client_name: str, handler_names: list = None):
             _set_status(client_name, "TO'XTATILDI ⛔")
             frappe.cache().delete_value(f"ibox_sync_stop_{client_name}")
             frappe.cache().delete_value(f"ibox_sync_lock_{client_name}")
+            frappe.cache().delete_value(f"ibox_sync_full_{client_name}")
             break
 
         handler_class = SYNC_HANDLERS.get(handler_name)
@@ -132,9 +168,9 @@ def sync_client(client_name: str, handler_names: list = None):
                 if internal_api is None:
                     from erpnext_with_ibox.ibox.api.internal_client import IBoxInternalClient
                     internal_api = IBoxInternalClient(client_name)
-                handler = handler_class(api, client_doc, internal_api=internal_api)
+                handler = handler_class(api, client_doc, is_cleanup_job=is_cleanup_job, internal_api=internal_api)
             else:
-                handler = handler_class(api, client_doc)
+                handler = handler_class(api, client_doc, is_cleanup_job=is_cleanup_job)
 
             result = handler.run()
             all_results[handler_name] = result
@@ -185,6 +221,7 @@ def sync_client(client_name: str, handler_names: list = None):
     # Lock tozalash — DOIMO
     frappe.cache().delete_value(f"ibox_sync_lock_{client_name}")
     frappe.cache().delete_value(f"ibox_sync_stop_{client_name}")
+    frappe.cache().delete_value(f"ibox_sync_full_{client_name}")
 
     frappe.db.set_value(
         "iBox Client",

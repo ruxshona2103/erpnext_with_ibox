@@ -49,8 +49,8 @@ class PurchaseSyncHandler(BaseSyncHandler):
     # Sync mode: None = hammasi, "purchases" = faqat xarid, "returns" = faqat vozvrat
     SYNC_MODE: str | None = None
 
-    def __init__(self, api_client, client_doc):
-        super().__init__(api_client, client_doc)
+    def __init__(self, api_client, client_doc, is_cleanup_job=False):
+        super().__init__(api_client, client_doc, is_cleanup_job=is_cleanup_job)
         # Per-sync-run cache: {date_str: rate} — DB ni har safar so'ramaslik uchun
         self._rate_cache: dict[str, float] = {}
         # Retry: birinchi urinishda skip qilingan recordlar (item/supplier/warehouse topilmagan)

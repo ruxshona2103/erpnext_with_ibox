@@ -47,6 +47,66 @@ class iBoxClient(Document):
         """Har qanday yangi sync boshlashdan oldin — eski stop flag va lock tozalash."""
         frappe.cache().delete_value(f"ibox_sync_stop_{self.name}")
         frappe.cache().delete_value(f"ibox_sync_lock_{self.name}")
+        frappe.cache().delete_value(f"ibox_sync_lock_{self.name}_time")
+
+    # ── Lock Management ──────────────────────────────────────────────
+
+    @frappe.whitelist()
+    def force_clear_locks(self):
+        """
+        Redis lock va stop flaglarni majburan tozalash.
+        Agar sync to'xtab qolgan bo'lsa (crashed job) — bu method uning qulflini ocharadi.
+        CFO Stan: Lock 2+ soat qo'lda turgan bo'lsa, avtomatik bekor qilish qabul qilishni talab qiladi.
+        """
+        try:
+            lock_key = f"ibox_sync_lock_{self.name}"
+            stop_key = f"ibox_sync_stop_{self.name}"
+            lock_time_key = f"{lock_key}_time"
+            
+            # Lock yoshi tekshirish (log uchun)
+            import time as time_module
+            lock_set_time = frappe.cache().get_value(lock_time_key)
+            lock_age = "Noma'lum"
+            if lock_set_time:
+                try:
+                    lock_age_sec = time_module.time() - float(lock_set_time)
+                    lock_age = f"{lock_age_sec/3600:.1f} soat" if lock_age_sec >= 3600 else f"{int(lock_age_sec/60)} min"
+                except Exception:
+                    pass
+            
+            # Lockni tozalash
+            frappe.cache().delete_value(lock_key)
+            frappe.cache().delete_value(lock_time_key)
+            frappe.cache().delete_value(stop_key)
+            
+            # Status ni reset qilish
+            frappe.db.set_value(
+                "iBox Client",
+                self.name,
+                "sync_status",
+                "Lock to'xtatildi ✓ Yangi sync boshlashga tayyor.",
+                update_modified=False,
+            )
+            frappe.db.commit()
+            
+            frappe.log_error(
+                title=f"Force Clear Locks - {self.name}",
+                message=f"Lock age: {lock_age}. User triggered manual unlock."
+            )
+            
+            return {
+                "success": True,
+                "message": f"Qulflar muvaffaqiyatli to'xtatildi (lock yoshi: {lock_age}). Yangi sync boshlashga tayyor."
+            }
+        except Exception as e:
+            frappe.log_error(
+                title=f"Force Clear Locks Error - {self.name}",
+                message=str(e)
+            )
+            return {
+                "success": False,
+                "message": f"Qulflarni tozalashda xatolik: {str(e)[:100]}"
+            }
 
     # ── Master Sync ──────────────────────────────────────────────────
 
@@ -157,6 +217,16 @@ class iBoxClient(Document):
             client_name=self.name, handler_names=["returns_only"],
         )
         return {"message": "Vozvratlar sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
+
+    @frappe.whitelist()
+    def sync_sales_returns(self):
+        self._prepare_for_sync()
+        frappe.enqueue(
+            "erpnext_with_ibox.ibox.sync.runner.sync_client",
+            queue=SYNC_QUEUE, timeout=SYNC_TIMEOUT,
+            client_name=self.name, handler_names=["sales_returns"],
+        )
+        return {"message": "Sotuv vozvratlari sinxronizatsiyasi boshlandi. Sync Status ni kuzating."}
 
     @frappe.whitelist()
     def sync_exchange_rates(self):

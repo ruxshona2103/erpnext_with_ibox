@@ -23,6 +23,7 @@ from erpnext_with_ibox.ibox.sync.payments import PaymentSyncHandler
 from erpnext_with_ibox.ibox.sync.payments_made import PaymentMadeSyncHandler
 from erpnext_with_ibox.ibox.sync.payment_transfers import PaymentTransferSyncHandler
 from erpnext_with_ibox.ibox.sync.sales import SalesSyncHandler
+from erpnext_with_ibox.ibox.sync.sales_returns import SalesReturnSyncHandler
 from erpnext_with_ibox.ibox.sync.stock_adjustments import StockAdjustmentSyncHandler
 from erpnext_with_ibox.ibox.sync.transfers import TransferSyncHandler
 from erpnext_with_ibox.ibox.sync.salaries import SalarySyncHandler
@@ -56,6 +57,7 @@ SYNC_HANDLERS = {
     "exchange_rates":   ExchangeRateSyncHandler,     # valyuta kurslari
     "payments":            PaymentSyncHandler,              # to'lovlar (kiruvchi)
     "sales":               SalesSyncHandler,                # sotuvlar (otgruzki)
+    "sales_returns":       SalesReturnSyncHandler,          # sotuv vozvratlari
     "payments_made":       PaymentMadeSyncHandler,          # chiquvchi to'lovlar
     "payment_transfers":   PaymentTransferSyncHandler,     # ichki pul ko'chirishlar
     "stock_adjustments":   StockAdjustmentSyncHandler,     # inventarizatsiya
@@ -78,6 +80,7 @@ __all__ = [
     "WarehouseSyncHandler",
     "PurchaseSyncHandler",
     "SalesSyncHandler",
+    "SalesReturnSyncHandler",
     "PurchasesOnlyHandler",
     "ReturnsOnlyHandler",
     "PaymentSyncHandler",

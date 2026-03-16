@@ -45,17 +45,19 @@ class BaseSyncHandler(ABC):
 
     # Progress har necha recordda yangilansin
     PROGRESS_INTERVAL = 200
+    BATCH_COMMIT_SIZE = BATCH_COMMIT_SIZE
 
     # ── Mirror Sync Configuration ─────────────────────────────────────
     # Sub-classlar override qiladi:
     IBOX_ID_FIELD: str = None        # Masalan: "custom_ibox_purchase_id"
     IBOX_CLIENT_FIELD: str = "custom_ibox_client"  # Barcha doctype larda bir xil
 
-    def __init__(self, api_client, client_doc):
+    def __init__(self, api_client, client_doc, is_cleanup_job=False):
         self.api = api_client
         self.client_doc = client_doc
         self.client_name = client_doc.name
         self.ibox_total = 0  # API dan kelgan umumiy yozuvlar soni
+        self.is_cleanup_job = is_cleanup_job  # Cleanup-specific sync uchun flag
 
         # ── Pagination & Date Filter — iBox Client dan o'qiladi ───────
         self.page_size = int(client_doc.get("sync_page_size") or 100)
@@ -66,6 +68,7 @@ class BaseSyncHandler(ABC):
         # ── Mirror Sync: API dan kelgan active ID lar to'plami ────────
         self._active_ibox_ids: set = set()
         self._cleanup_result: dict | None = None
+        self._api_response_status: int | None = 200
 
     @abstractmethod
     def fetch_data(self) -> Generator[dict, None, None]:
@@ -118,8 +121,10 @@ class BaseSyncHandler(ABC):
             )
             return {"processed": 0, "synced": 0, "errors": 0, "locked": True}
 
-        # ── Lock qo'yish (1 soat TTL) ───────────────────────────────
+        # ── Lock qo'yish (1 soat TTL) va vaqt belgilash ───────────────
         frappe.cache().set_value(lock_key, True, expires_in_sec=3600)
+        import time as time_module
+        frappe.cache().set_value(f"{lock_key}_time", str(time_module.time()), expires_in_sec=3600)
 
         processed = 0
         synced = 0
@@ -166,7 +171,7 @@ class BaseSyncHandler(ABC):
                     batch_count += 1
 
                     # ── Batch commit + memory cleanup ────────────────
-                    if batch_count >= BATCH_COMMIT_SIZE:
+                    if batch_count >= self.BATCH_COMMIT_SIZE:
                         frappe.db.commit()
                         batch_count = 0
                         frappe.local.cache = {}
@@ -193,9 +198,26 @@ class BaseSyncHandler(ABC):
             frappe.db.commit()
 
             # ── Mirror Sync: Orphan Cleanup ──────────────────────────
-            #   Faqat Full Sync muvaffaqiyatli tugagandan keyin ishga tushadi.
-            #   Qisman sync (stopped, locked) da HECH QACHON cleanup qilinmaydi.
-            if sync_completed_fully and self._active_ibox_ids and ORPHAN_CLEANUP_ENABLED:
+            # CFO Safety Rule:
+            #   Cleanup FAQAT quyidagi holatda ishga tushadi:
+            #     1) full_sync flag = True
+            #     2) API response status = 200
+            #     3) date-range incremental sync emas
+            #     4) sync to'liq yakunlangan
+            is_full_sync = bool(frappe.cache().get_value(f"ibox_sync_full_{self.client_name}"))
+            has_date_range = bool(self.sync_from_date or self.sync_to_date)
+            api_ok = int(self._api_response_status or 0) == 200
+
+            enable_cleanup = (
+                (is_full_sync or self.is_cleanup_job)
+                and sync_completed_fully
+                and api_ok
+                and not has_date_range
+                and self._active_ibox_ids 
+                and ORPHAN_CLEANUP_ENABLED
+            )
+            
+            if enable_cleanup:
                 self._set_status(f"{self.NAME}: Ortiqcha recordlarni tozalash...")
                 try:
                     self._cleanup_result = self.cleanup_orphaned_records()

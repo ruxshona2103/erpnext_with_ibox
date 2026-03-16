@@ -23,8 +23,8 @@ class ExchangeRateSyncHandler(BaseSyncHandler):
     FROM_CURRENCY = "USD"
     TO_CURRENCY = "UZS"
 
-    def __init__(self, api_client, client_doc, internal_api=None):
-        super().__init__(api_client, client_doc)
+    def __init__(self, api_client, client_doc, is_cleanup_job=False, internal_api=None):
+        super().__init__(api_client, client_doc, is_cleanup_job=is_cleanup_job)
         self.internal_api = internal_api
 
     def fetch_data(self) -> Generator[dict, None, None]:
