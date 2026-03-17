@@ -34,7 +34,7 @@ Warehouse Fallback Zanjiri:
 from typing import Generator
 
 import frappe
-from frappe.utils import getdate
+from frappe.utils import flt, getdate
 
 from erpnext_with_ibox.ibox.sync.base import BaseSyncHandler
 
@@ -267,7 +267,9 @@ class PurchaseSyncHandler(BaseSyncHandler):
 
         for detail in details:
             product_id = detail.get("product_id")
-            item_code = self._resolve_item(product_id)
+            product_data = detail.get("product") or {}
+            product_name = product_data.get("name") or ""
+            item_code = self._resolve_item(product_id, product_name)
 
             if not item_code:
                 # Item topilmadi — bu detail qatorini skip
@@ -289,6 +291,7 @@ class PurchaseSyncHandler(BaseSyncHandler):
 
             # ── UOM — Item dan stock_uom olish ───────────────────────
             uom = self._resolve_uom(item_code)
+            self._ensure_uom_in_item(item_code, uom)
 
             # ── Rate — iBox dan haqiqiy narx ─────────────────────────
             rate = abs(self._parse_float(
@@ -299,7 +302,7 @@ class PurchaseSyncHandler(BaseSyncHandler):
                 amount = -amount
 
             # ── Item Name ─────────────────────────────────────────────
-            item_name = self._resolve_item_name(item_code)
+            item_name = self._resolve_item_name(item_code)[:140]
 
             items.append({
                 "item_code": item_code,
@@ -332,10 +335,24 @@ class PurchaseSyncHandler(BaseSyncHandler):
                 )
             return False
 
-        # ── 8) Purchase Invoice DRAFT ─────────────────────────────────
+        # ── 8) Purchase Invoice DRAFT (SURGICAL SEQUENCE) ────────────
+        #   KETMA-KETLIK MUHIM:
+        #     1. new_doc + identity (supplier, company, posting_date)
+        #     2. set_missing_values() → ERPNext defaults
+        #     3. OVERWRITE → iBox qiymatlari (YAKUNIY SO'Z)
+        #     4. calculate_taxes_and_totals()
+
+        # ── Posting Date & Time ──────────────────────────────────────
+        raw_date = record.get("date", "")
+        posting_time = raw_date[11:19] if len(raw_date) > 18 else "00:00:00"
+
+        # ── STEP 1: Initialize + Identity ────────────────────────────
         pi = frappe.new_doc("Purchase Invoice")
         pi.supplier = supplier_name
         pi.company = company
+        pi.posting_date = posting_date
+        pi.posting_time = posting_time
+        pi.set_posting_time = 1
         pi.currency = currency
         pi.credit_to = credit_to
         pi.buying_price_list = "Standard Buying"
@@ -352,29 +369,76 @@ class PurchaseSyncHandler(BaseSyncHandler):
         for row in items:
             pi.append("items", row)
 
-        # ── 8.1) set_missing_values() → keyin OVERWRITE ─────────────
-        #    set_missing_values har xil default qiymatlarni to'ldiradi.
-        #    Property Setter orqali item_name uzunligi 1000 ga ko'tarilgan,
-        #    shuning uchun insert_item_price patchga hojat yo'q.
+        # ── STEP 2: ERPNext defaults (AVVAL chaqiriladi) ─────────────
         from unittest.mock import patch
 
         with patch(
             "erpnext.controllers.accounts_controller.get_exchange_rate",
             return_value=conversion_rate,
+        ), patch(
+            "erpnext.stock.get_item_details.insert_item_price",
+            return_value=None,
         ):
             pi.set_missing_values()
 
-        # OVERWRITE — set_missing_values qayta yozgan bo'lishi mumkin
+        # ── STEP 3: THE OVERWRITE (iBox — YAKUNIY SO'Z) ─────────────
+        #   set_missing_values() rate/amount/currency ni buzgan bo'lishi mumkin
+        pi.posting_date = posting_date
+        pi.posting_time = posting_time
+        pi.set_posting_time = 1
         pi.currency = currency
         pi.credit_to = credit_to
         pi.conversion_rate = conversion_rate
         pi.plc_conversion_rate = conversion_rate
+        pi.taxes_and_charges = ""  # Tax yo'q — iBox narxlari final
 
-        with patch(
-            "erpnext.controllers.accounts_controller.get_exchange_rate",
-            return_value=conversion_rate,
-        ):
-            pi.insert(ignore_permissions=True)
+        # Item rate/amount ni iBox qiymatlariga qayta yozish
+        for idx, item in enumerate(pi.items):
+            if idx < len(items):
+                item.rate = items[idx]["rate"]
+                item.amount = items[idx]["amount"]
+                item.base_rate = items[idx]["base_rate"]
+                item.base_amount = items[idx]["base_amount"]
+
+        # ── STEP 4: Recalculate ──────────────────────────────────────
+        pi.update_stock = 1
+        pi.calculate_taxes_and_totals()
+
+        # ── STEP 5: Rounding Adjustment (iBox total = ERPNext total) ─
+        if flt(ibox_total) > 0:
+            erp_grand = flt(getattr(pi, "grand_total", 0))
+            diff = flt(ibox_total) - erp_grand
+            tolerance = 5.0 if currency == "UZS" else 0.001
+            if abs(diff) > tolerance:
+                pi.rounding_adjustment = diff
+                pi.rounded_total = flt(ibox_total)
+                pi.base_rounding_adjustment = flt(diff * conversion_rate)
+                pi.base_rounded_total = flt(ibox_total * conversion_rate)
+
+        # ── STEP 6: Insert as DRAFT + Deadlock Retry ─────────────────
+        import time
+
+        for attempt in range(2):
+            try:
+                with patch(
+                    "erpnext.controllers.accounts_controller.get_exchange_rate",
+                    return_value=conversion_rate,
+                ), patch(
+                    "erpnext.stock.get_item_details.insert_item_price",
+                    return_value=None,
+                ):
+                    pi.insert(ignore_permissions=True)
+                break
+            except frappe.QueryDeadlockError:
+                frappe.db.rollback()
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                frappe.log_error(
+                    title=f"{doc_label} Sync - Deadlock - {self.client_name}",
+                    message=f"ibox_id={ibox_id}: 2 urinishdan keyin ham Deadlock.",
+                )
+                return False
 
         # ── 9) Har bir muvaffaqiyatli hujjatdan keyin commit ─────────
         frappe.db.commit()
@@ -435,13 +499,11 @@ class PurchaseSyncHandler(BaseSyncHandler):
             "name",
         )
 
-    def _resolve_item(self, product_id) -> str | None:
+    def _resolve_item(self, product_id, product_name: str = "") -> str | None:
         """
         iBox product_id → ERPNext Item.name  (field: custom_ibox_id)
 
-        Topilmasa → placeholder Item avtomatik yaratiladi.
-        Bu 100% mirror sync kafolatini beradi — hech qanday purchase
-        item topilmaganidan skip qilinmaydi.
+        Topilmasa → haqiqiy nomi bilan Item avtomatik yaratiladi.
         """
         if not product_id:
             return None
@@ -453,11 +515,12 @@ class PurchaseSyncHandler(BaseSyncHandler):
         if name:
             return name
 
-        # Auto-create: placeholder item
+        # Auto-create: haqiqiy nomi bilan
         try:
-            item_name = f"iBox-Product-{product_id}"
+            item_name = (product_name or f"iBox-Product-{product_id}")[:140]
+            item_code = (f"{item_name} - iBox-{product_id}")[:140]
             doc = frappe.new_doc("Item")
-            doc.item_code = item_name
+            doc.item_code = item_code
             doc.item_name = item_name
             doc.item_group = "All Item Groups"
             doc.stock_uom = "Nos"
@@ -478,6 +541,26 @@ class PurchaseSyncHandler(BaseSyncHandler):
                 message=f"product_id={product_id}\n{frappe.get_traceback()}",
             )
             return None
+
+    def _ensure_uom_in_item(self, item_code: str, uom: str):
+        """Item ning UOM jadvalida ushbu UOM mavjudligini tekshirish va kerak bo'lsa qo'shish."""
+        if not item_code or not uom:
+            return
+        exists = frappe.db.exists(
+            "UOM Conversion Detail",
+            {"parent": item_code, "parenttype": "Item", "uom": uom},
+        )
+        if exists:
+            return
+        if not frappe.db.exists("UOM", uom):
+            return
+        try:
+            item_doc = frappe.get_doc("Item", item_code)
+            item_doc.append("uoms", {"uom": uom, "conversion_factor": 1.0})
+            item_doc.save(ignore_permissions=True)
+            frappe.db.commit()
+        except Exception:
+            pass
 
     def _resolve_uom(self, item_code: str) -> str:
         """Item.stock_uom ni olish. Topilmasa 'Nos' (ERPNext default)."""

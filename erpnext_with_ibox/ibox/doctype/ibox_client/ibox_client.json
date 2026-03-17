@@ -33,6 +33,12 @@
         "column_break_sales_income",
         "uzs_sales_income",
         "usd_sales_income",
+        "salary_accounts_section",
+        "uzs_salary_expense_account",
+        "uzs_salary_cash_account",
+        "column_break_salary",
+        "usd_salary_expense_account",
+        "usd_salary_cash_account",
         "sync_settings_section",
         "sync_from_date",
         "sync_to_date",
@@ -201,6 +207,43 @@
             "options": "Account"
         },
         {
+            "fieldname": "salary_accounts_section",
+            "fieldtype": "Section Break",
+            "label": "Salary Accounts"
+        },
+        {
+            "description": "Oylik maosh uchun UZS Expense hisobi (Journal Entry debit)",
+            "fieldname": "uzs_salary_expense_account",
+            "fieldtype": "Link",
+            "label": "UZS Salary Expense Account",
+            "options": "Account"
+        },
+        {
+            "description": "Oylik maosh uchun UZS Cash/Bank hisobi (Journal Entry credit)",
+            "fieldname": "uzs_salary_cash_account",
+            "fieldtype": "Link",
+            "label": "UZS Salary Cash Account",
+            "options": "Account"
+        },
+        {
+            "fieldname": "column_break_salary",
+            "fieldtype": "Column Break"
+        },
+        {
+            "description": "Oylik maosh uchun USD Expense hisobi (Journal Entry debit)",
+            "fieldname": "usd_salary_expense_account",
+            "fieldtype": "Link",
+            "label": "USD Salary Expense Account",
+            "options": "Account"
+        },
+        {
+            "description": "Oylik maosh uchun USD Cash/Bank hisobi (Journal Entry credit)",
+            "fieldname": "usd_salary_cash_account",
+            "fieldtype": "Link",
+            "label": "USD Salary Cash Account",
+            "options": "Account"
+        },
+        {
             "fieldname": "sync_settings_section",
             "fieldtype": "Section Break",
             "label": "Sync Settings"
@@ -238,7 +281,7 @@
     ],
     "index_web_pages_for_search": 1,
     "links": [],
-    "modified": "2026-03-15 15:00:00.000000",
+    "modified": "2026-03-16 13:00:00.000000",
     "modified_by": "Administrator",
     "module": "ibox",
     "name": "iBox Client",

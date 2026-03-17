@@ -48,7 +48,7 @@ class CurrencyExchangeSyncHandler(BaseSyncHandler):
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox API dan currency exchange recordlarni yield qilish."""
         per_page = self.page_size or 100
-        max_pages = self.max_pages or 2
+        max_pages = self.max_pages or 0  # 0 = cheksiz (avval 2 edi, barcha recordlar sync bo'lishi uchun olib tashlandi)
 
         first_page = self.api.currency_exchanges.get_page(page=1, per_page=1)
         self.ibox_total = first_page.get("total", 0)

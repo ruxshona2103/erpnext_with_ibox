@@ -17,11 +17,14 @@ class PaymentSyncHandler(BaseSyncHandler):
 
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox API dan barcha to'lovlarni sahifa-sahifa yield qilish."""
-        page = 1
-        per_page = 100
-        total_pages = None
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 0  # 0 = cheksiz
 
+        page = 1
         while True:
+            if max_pages and page > max_pages:
+                break
+
             response = self.api.request(
                 method="GET",
                 endpoint=SLUG_PAYMENTS,
@@ -29,8 +32,9 @@ class PaymentSyncHandler(BaseSyncHandler):
             )
             records = response.get("data", [])
 
-            if total_pages is None:
-                total_pages = response.get("last_page", 1)
+            if page == 1:
+                total = int(flt(response.get("total", 0)))
+                self.ibox_total = min(total, max_pages * per_page) if max_pages else total
 
             if not records:
                 break
@@ -38,11 +42,11 @@ class PaymentSyncHandler(BaseSyncHandler):
             for record in records:
                 yield record
 
-            if page >= total_pages or len(records) < per_page:
+            if len(records) < per_page:
                 break
 
+            time.sleep(1)
             page += 1
-            time.sleep(1)  # Rate limit — 429 xatosidan saqlash
 
     def upsert(self, record: dict) -> bool:
         """
@@ -76,20 +80,6 @@ class PaymentSyncHandler(BaseSyncHandler):
             "Company", company, "default_currency"
         ) or "USD"
 
-        # paid_from — mijozning Receivable (Debitor) accounti
-        # Payment Entry type=Receive uchun MAJBURIY maydon
-        paid_from = self._get_receivable_account()
-        if not paid_from:
-            frappe.log_error(
-                title=f"Payments Config Error - {self.client_name}",
-                message=(
-                    f"payment_id={ibox_payment_id}: Kompaniya '{company}' uchun "
-                    f"Receivable account topilmadi. "
-                    f"ERPNext → Chart of Accounts dan account_type='Receivable' mavjudligini tekshiring."
-                )
-            )
-            return False
-
         changed = False
 
         for detail in record.get("payment_details", []):
@@ -101,7 +91,6 @@ class PaymentSyncHandler(BaseSyncHandler):
             # Mode of Payment — cashbox mapping dan
             mode_of_payment = self._get_mode_of_payment(cashbox_id, payment_currency)
             if not mode_of_payment:
-                # Cashbox mapping yo'q — bu detail ni o'tkazib yuboramiz
                 continue
 
             # Deduplication — bir xil detail qayta kiritilmasin
@@ -110,6 +99,18 @@ class PaymentSyncHandler(BaseSyncHandler):
                 {"custom_ibox_payment_detail_id": detail_id},
                 "name"
             ):
+                continue
+
+            # paid_from — Receivable account (currency bo'yicha)
+            paid_from = self._get_receivable_account(payment_currency)
+            if not paid_from:
+                frappe.log_error(
+                    title=f"Payments Config Error - {self.client_name}",
+                    message=(
+                        f"payment_id={ibox_payment_id} detail_id={detail_id}: "
+                        f"Receivable account topilmadi (currency={payment_currency})."
+                    )
+                )
                 continue
 
             # paid_to — Mode of Payment dan topamiz
@@ -125,22 +126,21 @@ class PaymentSyncHandler(BaseSyncHandler):
                 )
                 continue
 
-            # Exchange rate hisoblash
-            if payment_currency == company_currency:
-                exchange_rate = 1.0
-            else:
-                exchange_rate = flt(
-                    frappe.db.get_value(
-                        "Currency Exchange",
-                        {"from_currency": payment_currency, "to_currency": company_currency},
-                        "exchange_rate"
-                    )
-                ) or 1.0
+            # Haqiqiy account valyutalarini aniqlash
+            paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or company_currency
+            paid_to_currency = frappe.db.get_value("Account", paid_to, "account_currency") or company_currency
 
-            # paid_amount  = mijoz valyutasidagi summa (iBox dan keladi)
-            # received_amount = kompaniya valyutasidagi summa (konvertatsiyadan keyin)
+            # Exchange rate hisoblash
+            source_exchange_rate = self._get_exchange_rate(paid_from_currency, company_currency, posting_date)
+            target_exchange_rate = self._get_exchange_rate(paid_to_currency, company_currency, posting_date)
+
+            # paid_amount  = paid_from account valyutasidagi summa
+            # received_amount = paid_to account valyutasidagi summa
             paid_amount = flt(amount, 2)
-            received_amount = flt(amount * exchange_rate, 2)
+            if source_exchange_rate == target_exchange_rate:
+                received_amount = paid_amount
+            else:
+                received_amount = flt(paid_amount * source_exchange_rate / target_exchange_rate, 2)
 
             try:
                 doc = frappe.get_doc({
@@ -152,17 +152,17 @@ class PaymentSyncHandler(BaseSyncHandler):
                     "posting_date": posting_date,
                     "mode_of_payment": mode_of_payment,
                     # Hisob raqamlar
-                    "paid_from": paid_from,               # Receivable (Debitor) — MAJBURIY
+                    "paid_from": paid_from,               # Receivable (Debitor)
                     "paid_to": paid_to,                   # Cash/Bank
-                    # Valyutalar
-                    "paid_from_account_currency": payment_currency,
-                    "paid_to_account_currency": company_currency,
+                    # Valyutalar — HAQIQIY account valyutalari
+                    "paid_from_account_currency": paid_from_currency,
+                    "paid_to_account_currency": paid_to_currency,
                     # Miqdorlar
                     "paid_amount": paid_amount,
                     "received_amount": received_amount,
                     # Exchange rates
-                    "source_exchange_rate": exchange_rate,
-                    "target_exchange_rate": 1.0,
+                    "source_exchange_rate": source_exchange_rate,
+                    "target_exchange_rate": target_exchange_rate,
                     # iBox meta
                     "custom_ibox_client": self.client_name,
                     "custom_ibox_payment_id": ibox_payment_id,
@@ -203,29 +203,67 @@ class PaymentSyncHandler(BaseSyncHandler):
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
-        return f"iBox Kassa - {cashbox_name} ({currency})"
+        return f"iBox - {cashbox_name} ({currency})"
 
-    def _get_receivable_account(self) -> str:
+    def _get_receivable_account(self, currency: str = "") -> str:
         """
         Kompaniyaning Receivable (Debitor) accountini topish.
-        Payment Entry type=Receive uchun paid_from field ga kerak.
+        iBox Client dagi uzs/usd_receivable_account dan olinadi.
         """
-        company = self.client_doc.company
+        # 1. iBox Client da currency bo'yicha belgilangan receivable account
+        if currency == "UZS" and self.client_doc.get("uzs_receivable_account"):
+            return self.client_doc.uzs_receivable_account
+        if currency == "USD" and self.client_doc.get("usd_receivable_account"):
+            return self.client_doc.usd_receivable_account
 
-        # 1. Company default receivable account
+        # 2. Company default receivable account
+        company = self.client_doc.company
         receivable = frappe.db.get_value(
             "Company", company, "default_receivable_account"
         )
         if receivable:
             return receivable
 
-        # 2. Chart of Accounts dan account_type=Receivable qidirish
+        # 3. Chart of Accounts dan account_type=Receivable qidirish
         receivable = frappe.db.get_value(
             "Account",
             {"company": company, "account_type": "Receivable", "is_group": 0},
             "name"
         )
         return receivable or ""
+
+    def _get_exchange_rate(self, from_currency: str, company_currency: str, posting_date: str) -> float:
+        """Valyuta kursini aniqlash."""
+        if from_currency == company_currency:
+            return 1.0
+
+        exchange_rate = flt(
+            frappe.db.get_value(
+                "Currency Exchange",
+                {"from_currency": from_currency, "to_currency": company_currency},
+                "exchange_rate"
+            )
+        )
+
+        # UZS dan USD ga: agar kurs 12300 qilib kiritilgan bo'lsa inversiya
+        if exchange_rate > 1 and from_currency == "UZS" and company_currency in ["USD", "EUR", "RUB"]:
+            exchange_rate = 1.0 / exchange_rate
+
+        if exchange_rate:
+            return exchange_rate
+
+        # Teskari yo'nalishni tekshirish
+        reverse_rate = flt(
+            frappe.db.get_value(
+                "Currency Exchange",
+                {"from_currency": company_currency, "to_currency": from_currency},
+                "exchange_rate"
+            )
+        )
+        if reverse_rate:
+            return 1.0 / reverse_rate
+
+        return 1.0
 
     def _get_paid_to_account(self, mode_of_payment: str, currency: str) -> str:
         """

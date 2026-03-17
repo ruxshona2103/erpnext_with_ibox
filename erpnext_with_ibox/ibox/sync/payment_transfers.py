@@ -19,9 +19,13 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
         page_size va max_pages iBox Client sozlamalaridan olinadi.
         """
         per_page = self.page_size or 100
-        max_pages = self.max_pages or 2
+        max_pages = self.max_pages or 0  # 0 = cheksiz
 
-        for page in range(1, max_pages + 1):
+        page = 1
+        while True:
+            if max_pages and page > max_pages:
+                break
+
             response = self.api.request(
                 method="GET",
                 endpoint=SLUG_PAYMENT_TRANSFERS,
@@ -30,7 +34,8 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
             records = response.get("data", [])
 
             if page == 1:
-                self.ibox_total = min(int(flt(response.get("total", 0))), max_pages * per_page)
+                total = int(flt(response.get("total", 0)))
+                self.ibox_total = min(total, max_pages * per_page) if max_pages else total
 
             if not records:
                 break
@@ -42,6 +47,7 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
                 break
 
             time.sleep(1)
+            page += 1
 
     def upsert(self, record: dict) -> bool:
         transfer_id = str(record.get("id"))
@@ -187,7 +193,7 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
-        return f"iBox Kassa - {cashbox_name} ({currency})"
+        return f"iBox - {cashbox_name} ({currency})"
 
     def _get_cashbox_account(self, mode_of_payment: str) -> str:
         company = self.client_doc.company

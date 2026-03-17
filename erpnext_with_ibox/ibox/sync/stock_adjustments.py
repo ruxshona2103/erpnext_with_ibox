@@ -59,7 +59,7 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
     def fetch_data(self) -> Generator[dict, None, None]:
         """iBox Internal API dan stock adjustment recordlarni yield qilish."""
         per_page = self.page_size or 100
-        max_pages = self.max_pages or 2
+        max_pages = self.max_pages or 0  # 0 = cheksiz
 
         first_page = self.internal_api.stock_adjustments.get_page(page=1, per_page=1)
         self.ibox_total = first_page.get("total", 0)

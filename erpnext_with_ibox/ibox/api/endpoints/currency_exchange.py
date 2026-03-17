@@ -50,7 +50,7 @@ class CurrencyExchangeEndpoint:
         page = 1
         total_pages = None
 
-        while page <= max_pages:
+        while max_pages == 0 or page <= max_pages:
             response = self.get_page(page=page, per_page=per_page)
             records = response.get("data", [])
 

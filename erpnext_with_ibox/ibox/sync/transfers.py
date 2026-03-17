@@ -55,7 +55,7 @@ class TransferSyncHandler(BaseSyncHandler):
         detail record ga qo'shib yuboramiz.
         """
         per_page = self.page_size or 100
-        max_pages = self.max_pages or 2
+        max_pages = self.max_pages or 0  # 0 = cheksiz
         page = 1
 
         first_page = self.internal_api.transfers.get_page(page=1, per_page=1)

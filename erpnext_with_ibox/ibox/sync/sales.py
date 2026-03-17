@@ -61,6 +61,7 @@ Permanent Draft Mode:
     - frappe.db.commit() har batch tugaganda
 """
 
+import time
 from typing import Generator
 
 import frappe
@@ -176,8 +177,33 @@ class SalesSyncHandler(BaseSyncHandler):
         return result
 
     def fetch_data(self) -> Generator[dict, None, None]:
-        """iBox API dan shipment recordlarni yield qilish."""
-        yield from self.api.shipments.get_all()
+        """iBox API dan shipment recordlarni sahifa-sahifa yield qilish."""
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 0  # 0 = cheksiz
+
+        page = 1
+        while True:
+            if max_pages and page > max_pages:
+                break
+
+            response = self.api.shipments.get_page(page=page, per_page=per_page)
+            records = response.get("data", [])
+
+            if page == 1:
+                total = int(flt(response.get("total", 0)))
+                self.ibox_total = min(total, max_pages * per_page) if max_pages else total
+
+            if not records:
+                break
+
+            for record in records:
+                yield record
+
+            if len(records) < per_page:
+                break
+
+            time.sleep(1)
+            page += 1
 
     def upsert(self, record: dict) -> bool:
         """
@@ -293,7 +319,9 @@ class SalesSyncHandler(BaseSyncHandler):
 
         for detail in details:
             product_id = detail.get("product_id")
-            item_code = self._resolve_item(product_id)
+            product_data = detail.get("product") or {}
+            product_name = product_data.get("name") or ""
+            item_code = self._resolve_item(product_id, product_name)
 
             if not item_code:
                 self._skip_log["missing_items"].append(product_id)
@@ -323,7 +351,7 @@ class SalesSyncHandler(BaseSyncHandler):
             # UOM & item_name — Item master dan olish
             uom = self._resolve_uom(item_code)
             self._ensure_uom_in_item(item_code, uom)
-            item_name = self._resolve_item_name(item_code)
+            item_name = self._resolve_item_name(item_code)[:140]
 
             items.append({
                 "item_code":                item_code,
@@ -380,6 +408,9 @@ class SalesSyncHandler(BaseSyncHandler):
         with patch(
             "erpnext.controllers.accounts_controller.get_exchange_rate",
             return_value=effective_conversion_rate,
+        ), patch(
+            "erpnext.stock.get_item_details.insert_item_price",
+            return_value=None,
         ):
             si.set_missing_values()
 
@@ -420,6 +451,9 @@ class SalesSyncHandler(BaseSyncHandler):
                 with patch(
                         "erpnext.controllers.accounts_controller.get_exchange_rate",
                     return_value=effective_conversion_rate,
+                ), patch(
+                    "erpnext.stock.get_item_details.insert_item_price",
+                    return_value=None,
                 ):
                     si.insert(ignore_permissions=True)
                 return True  # Muvaffaqiyatli
@@ -502,11 +536,11 @@ class SalesSyncHandler(BaseSyncHandler):
             "name",
         )
 
-    def _resolve_item(self, product_id) -> str | None:
+    def _resolve_item(self, product_id, product_name: str = "") -> str | None:
         """
         iBox product_id → ERPNext Item.name  (field: custom_ibox_id)
 
-        Topilmasa → placeholder Item avtomatik yaratiladi.
+        Topilmasa → haqiqiy nomi bilan Item avtomatik yaratiladi.
         """
         if not product_id:
             return None
@@ -518,11 +552,12 @@ class SalesSyncHandler(BaseSyncHandler):
         if name:
             return name
 
-        # Auto-create: placeholder item
+        # Auto-create: haqiqiy nomi bilan
         try:
-            item_name = f"iBox-Product-{product_id}"
+            item_name = (product_name or f"iBox-Product-{product_id}")[:140]
+            item_code = (f"{item_name} - iBox-{product_id}")[:140]
             doc = frappe.new_doc("Item")
-            doc.item_code = item_name
+            doc.item_code = item_code
             doc.item_name = item_name
             doc.item_group = "All Item Groups"
             doc.stock_uom = "Nos"
