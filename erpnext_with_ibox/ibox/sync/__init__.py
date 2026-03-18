@@ -35,14 +35,58 @@ class PurchasesOnlyHandler(PurchaseSyncHandler):
     """Faqat xaridlarni yuklaydi (vozvratlar yuklanmaydi)."""
     NAME = "Purchases (Xaridlar)"
     def fetch_data(self):
-        yield from self.api.purchases.get_all_purchases()
+        import time as _time
+        from frappe.utils import flt
+        from erpnext_with_ibox.ibox.config import API_PAGE_DELAY
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 0
+        page = 1
+        while True:
+            if max_pages and page > max_pages:
+                break
+            response = self.api.purchases.get_purchase_page(page=page, per_page=per_page)
+            records = response.get("data", [])
+            if page == 1:
+                total = int(flt(response.get("total", 0)))
+                self.ibox_total = min(total, max_pages * per_page) if max_pages else total
+            if not records:
+                break
+            for record in records:
+                record["_is_return"] = False
+                yield record
+            if len(records) < per_page:
+                break
+            _time.sleep(API_PAGE_DELAY)
+            page += 1
 
 
 class ReturnsOnlyHandler(PurchaseSyncHandler):
     """Faqat vozvratlarni yuklaydi (xaridlar yuklanmaydi)."""
     NAME = "Returns (Vozvratlar)"
     def fetch_data(self):
-        yield from self.api.purchases.get_all_returns()
+        import time as _time
+        from frappe.utils import flt
+        from erpnext_with_ibox.ibox.config import API_PAGE_DELAY
+        per_page = self.page_size or 100
+        max_pages = self.max_pages or 0
+        page = 1
+        while True:
+            if max_pages and page > max_pages:
+                break
+            response = self.api.purchases.get_return_page(page=page, per_page=per_page)
+            records = response.get("data", [])
+            if page == 1:
+                total = int(flt(response.get("total", 0)))
+                self.ibox_total = min(total, max_pages * per_page) if max_pages else total
+            if not records:
+                break
+            for record in records:
+                record["_is_return"] = True
+                yield record
+            if len(records) < per_page:
+                break
+            _time.sleep(API_PAGE_DELAY)
+            page += 1
 
 
 # Handler registry — barcha mavjud handlerlar

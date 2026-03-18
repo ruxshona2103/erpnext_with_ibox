@@ -182,7 +182,7 @@ class SalesReturnSyncHandler(SalesSyncHandler):
 
             items.append({
                 "item_code": item_code,
-                "item_name": item_name,
+                "item_name": item_name[:140],
                 "warehouse": row_wh_name,
                 "qty": final_qty,
                 "rate": rate,
@@ -191,6 +191,7 @@ class SalesReturnSyncHandler(SalesSyncHandler):
                 "stock_qty": final_qty,
                 "conversion_factor": 1,
                 "income_account": income_account,
+                "allow_zero_valuation_rate": 1,
                 "custom_ibox_detail_id": detail.get("id"),
                 "custom_ibox_warehouse_id": row_wh_id,
             })

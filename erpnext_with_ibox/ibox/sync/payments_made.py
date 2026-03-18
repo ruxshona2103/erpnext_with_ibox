@@ -236,7 +236,7 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
         if frappe.db.exists("Journal Entry", {"user_remark": f"iBox Payment Detail ID: {detail_id}"}):
             return False
 
-        # Tushum qilinadigan xarajat hisobini (Expense Account) topish (Hozircha default payable sifatida kiritib qolamiz, chunki maxsus account so'ralmagan)
+        # Tushum qilinadigan xarajat hisobini topish
         target_account = self.client_doc.get("uzs_payable_account") if payment_currency == "UZS" else self.client_doc.get("usd_payable_account")
         if not target_account:
             target_account = frappe.db.get_value("Company", company, "default_payable_account")
@@ -247,6 +247,28 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
                 )
                 return False
 
+        # Payable account uchun party_type va party kerak (ERPNext validation)
+        target_acct_type = frappe.db.get_value("Account", target_account, "account_type")
+        debit_row = {
+            "account": target_account,
+            "debit_in_account_currency": paid_amount,
+            "exchange_rate": exchange_rate,
+        }
+        credit_row = {
+            "account": paid_from_account,
+            "credit_in_account_currency": paid_amount,
+            "exchange_rate": exchange_rate,
+        }
+
+        # Agar Payable/Receivable account bo'lsa — party majburiy
+        if target_acct_type in ("Payable", "Receivable"):
+            # Default supplier topish yoki yaratish (valyutaga qarab alohida)
+            party_type = "Supplier" if target_acct_type == "Payable" else "Customer"
+            default_party = self._get_default_expense_party(company, party_type, payment_currency)
+            if default_party:
+                debit_row["party_type"] = party_type
+                debit_row["party"] = default_party
+
         try:
             je = frappe.get_doc({
                 "doctype": "Journal Entry",
@@ -255,18 +277,7 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
                 "company": company,
                 "multi_currency": 1,
                 "user_remark": f"iBox Payment Detail ID: {detail_id}",
-                "accounts": [
-                    {
-                        "account": target_account,
-                        "debit_in_account_currency": paid_amount,
-                        "exchange_rate": exchange_rate,
-                    },
-                    {
-                        "account": paid_from_account,
-                        "credit_in_account_currency": paid_amount,
-                        "exchange_rate": exchange_rate,
-                    }
-                ]
+                "accounts": [debit_row, credit_row]
             })
             je.insert(ignore_permissions=True)
             je.submit() # Kassadan to'g'ridan to'g'ri chiqib ketgani uchun submit ham bo'lishi kerak.
@@ -299,6 +310,26 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
         return f"iBox - {cashbox_name} ({currency})"
+
+    def _get_default_expense_party(self, company: str, party_type: str, currency: str = "UZS") -> str:
+        """Payable/Receivable JE uchun default party topish yoki yaratish.
+        Har bir valyuta uchun alohida party — ERPNext party currency cheklovi sababli."""
+        if party_type == "Supplier":
+            supplier_name = f"iBox Xarajatlar ({currency})"
+            name = frappe.db.get_value("Supplier", {"supplier_name": supplier_name, "custom_ibox_client": self.client_name}, "name")
+            if name:
+                return name
+            try:
+                doc = frappe.new_doc("Supplier")
+                doc.supplier_name = supplier_name
+                doc.supplier_group = "All Supplier Groups"
+                doc.custom_ibox_client = self.client_name
+                doc.insert(ignore_permissions=True)
+                frappe.db.commit()
+                return doc.name
+            except Exception:
+                return ""
+        return ""
 
     def _get_cashbox_account(self, mode_of_payment: str, currency: str) -> str:
         """Kassani (paid_from_account) hisobiga erishish."""

@@ -47,7 +47,7 @@ class ItemSyncHandler(BaseSyncHandler):
 
     def upsert(self, record: dict) -> bool:
         ibox_id = record.get("id")
-        item_name = self._clean(record.get("name"), "Noma'lum mahsulot")
+        item_name = self._clean(record.get("name"), "Noma'lum mahsulot")[:140]
         base_code = self._sanitize(item_name)[:130] or f"IBOX-{ibox_id}"
         item_code = base_code
 

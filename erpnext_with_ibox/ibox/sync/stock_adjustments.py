@@ -134,19 +134,6 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
             if qty == 0:
                 continue
 
-            valuation_rate = flt(detail.get("price", 0))
-
-            if valuation_rate <= 0:
-                valuation_rate = flt(
-                    frappe.db.get_value("Item", item_code, "valuation_rate")
-                ) or flt(
-                    frappe.db.get_value(
-                        "Bin",
-                        {"item_code": item_code, "warehouse": warehouse_name},
-                        "valuation_rate",
-                    )
-                )
-
             uom = frappe.db.get_value("Item", item_code, "stock_uom") or "Nos"
 
             item_row = {
@@ -155,8 +142,8 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                 "uom": uom,
                 "stock_uom": uom,
                 "conversion_factor": 1,
-                "basic_rate": valuation_rate if valuation_rate > 0 else 0,
-                "allow_zero_valuation_rate": 1 if valuation_rate <= 0 else 0,
+                "basic_rate": 0,
+                "allow_zero_valuation_rate": 1,
             }
 
             if qty > 0:
@@ -194,6 +181,7 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                     "items": receipt_items,
                 })
                 doc.insert(ignore_permissions=True)
+                self._force_zero_rates(doc)
                 created = True
             except Exception:
                 frappe.log_error(
@@ -219,6 +207,7 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                     "items": issue_items,
                 })
                 doc.insert(ignore_permissions=True)
+                self._force_zero_rates(doc)
                 created = True
             except Exception:
                 frappe.log_error(
@@ -227,6 +216,22 @@ class StockAdjustmentSyncHandler(BaseSyncHandler):
                 )
 
         return created
+
+    @staticmethod
+    def _force_zero_rates(doc):
+        """Insert dan keyin ERPNext auto-set qilgan basic_rate larni 0 ga qaytarish."""
+        for item in doc.items:
+            if item.basic_rate != 0:
+                frappe.db.set_value(
+                    "Stock Entry Detail", item.name,
+                    {"basic_rate": 0, "basic_amount": 0, "amount": 0},
+                    update_modified=False,
+                )
+        frappe.db.set_value(
+            "Stock Entry", doc.name,
+            {"total_incoming_value": 0, "total_outgoing_value": 0, "value_difference": 0},
+            update_modified=False,
+        )
 
     def _resolve_warehouse(self, warehouse_id) -> str | None:
         """iBox warehouse_id → ERPNext Warehouse.name"""
