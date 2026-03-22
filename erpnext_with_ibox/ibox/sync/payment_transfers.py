@@ -84,8 +84,8 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
             )
             return False
 
-        paid_from = self._get_cashbox_account(from_mode_of_payment)
-        paid_to = self._get_cashbox_account(to_mode_of_payment)
+        paid_from = self._get_cashbox_account(from_mode_of_payment, transfer_currency)
+        paid_to = self._get_cashbox_account(to_mode_of_payment, transfer_currency)
 
         if not paid_from or not paid_to:
             self._log_config_error(
@@ -185,17 +185,41 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
                 cashbox_name = row.cashbox_name or fallback_cashbox_name
                 break
 
-        if currency and cashbox_name:
-            preferred_mode_of_payment = self._build_currency_mode_of_payment(cashbox_name, currency)
-            if frappe.db.exists("Mode of Payment", preferred_mode_of_payment):
-                return preferred_mode_of_payment
+        if not fallback_mode_of_payment:
+            return ""
+
+        if not currency:
+            return fallback_mode_of_payment
+
+        candidates = [self._replace_currency_suffix(fallback_mode_of_payment, currency)]
+
+        if cashbox_name:
+            candidates.append(f"iBox Kassa - {cashbox_name} ({currency})")
+            candidates.append(self._build_currency_mode_of_payment(cashbox_name, currency))
+
+        candidates.append(fallback_mode_of_payment)
+
+        for mop in candidates:
+            if mop and frappe.db.exists("Mode of Payment", mop):
+                return mop
 
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
         return f"iBox - {cashbox_name} ({currency})"
 
-    def _get_cashbox_account(self, mode_of_payment: str) -> str:
+    @staticmethod
+    def _replace_currency_suffix(mode_of_payment: str, currency: str) -> str:
+        if not mode_of_payment:
+            return mode_of_payment
+
+        if " (" in mode_of_payment and mode_of_payment.endswith(")"):
+            base = mode_of_payment.rsplit(" (", 1)[0]
+            return f"{base} ({currency})"
+
+        return mode_of_payment
+
+    def _get_cashbox_account(self, mode_of_payment: str, currency: str | None = None) -> str:
         company = self.client_doc.company
 
         mop_account = frappe.db.get_value(
@@ -204,7 +228,40 @@ class PaymentTransferSyncHandler(BaseSyncHandler):
             "default_account"
         )
         if mop_account:
+            if not currency:
+                return mop_account
+
+            acc_currency = frappe.db.get_value("Account", mop_account, "account_currency")
+            if not acc_currency or acc_currency == currency:
+                return mop_account
+
+            currency_cash = frappe.db.get_value(
+                "Account",
+                {
+                    "company": company,
+                    "account_type": "Cash",
+                    "is_group": 0,
+                    "account_currency": currency,
+                },
+                "name",
+            )
+            if currency_cash:
+                return currency_cash
             return mop_account
+
+        if currency:
+            currency_cash = frappe.db.get_value(
+                "Account",
+                {
+                    "company": company,
+                    "account_type": "Cash",
+                    "is_group": 0,
+                    "account_currency": currency,
+                },
+                "name",
+            )
+            if currency_cash:
+                return currency_cash
 
         return ""
 

@@ -237,7 +237,8 @@ class SalesSyncHandler(BaseSyncHandler):
 
         # ── 3) Customer lookup (non-blocking) ─────────────────────────
         outlet_id = record.get("outlet_id")
-        customer_name = self._resolve_customer(outlet_id)
+        outlet_name = self._extract_outlet_name(record)
+        customer_name = self._resolve_customer(outlet_id, outlet_name)
         if not customer_name:
             if not record.get("_is_retry"):
                 record["_is_retry"] = True
@@ -487,7 +488,7 @@ class SalesSyncHandler(BaseSyncHandler):
     # Resolver Methods
     # ══════════════════════════════════════════════════════════════════
 
-    def _resolve_customer(self, outlet_id) -> str | None:
+    def _resolve_customer(self, outlet_id, outlet_name: str = "") -> str | None:
         """
         iBox outlet_id → ERPNext Customer.name  (field: custom_ibox_id)
 
@@ -505,7 +506,9 @@ class SalesSyncHandler(BaseSyncHandler):
 
         # Auto-create: placeholder customer
         try:
-            customer_name = f"iBox-Customer-{outlet_id}"
+            customer_name = self._clean(outlet_name)
+            if not customer_name:
+                customer_name = f"iBox-Customer-{outlet_id}"
             doc = frappe.new_doc("Customer")
             doc.customer_name = customer_name
             doc.customer_group = "All Customer Groups"
@@ -516,7 +519,10 @@ class SalesSyncHandler(BaseSyncHandler):
             frappe.db.commit()
             frappe.log_error(
                 title=f"Auto-created Customer - {self.client_name}",
-                message=f"Customer '{customer_name}' (ibox_id={outlet_id}) avtomatik yaratildi.",
+                message=(
+                    f"Customer '{customer_name}' (ibox_id={outlet_id}) avtomatik yaratildi. "
+                    f"source_outlet_name='{outlet_name or ''}'"
+                ),
             )
             return doc.name
         except Exception:
@@ -525,6 +531,17 @@ class SalesSyncHandler(BaseSyncHandler):
                 message=f"outlet_id={outlet_id}\n{frappe.get_traceback()}",
             )
             return None
+
+    @staticmethod
+    def _extract_outlet_name(record: dict) -> str:
+        """Shipment recorddan outlet nomini olishga urinish."""
+        outlet = record.get("outlet") or {}
+        return (
+            str(record.get("outlet_name") or "").strip()
+            or str(record.get("customer_name") or "").strip()
+            or str(outlet.get("name") or "").strip()
+            or ""
+        )
 
     def _resolve_warehouse(self, warehouse_id) -> str | None:
         """iBox warehouse_id → ERPNext Warehouse.name  (field: custom_ibox_warehouse_id)"""

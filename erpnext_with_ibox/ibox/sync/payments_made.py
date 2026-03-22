@@ -291,7 +291,7 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
             return False
 
     def _get_mode_of_payment(self, cashbox_id: str, currency: str | None = None) -> str:
-        """Kassani o'rnatish."""
+        """cashbox_id + currency bo'yicha Mode of Payment topish."""
         fallback_mode_of_payment = None
         cashbox_name = None
 
@@ -301,15 +301,43 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
                 cashbox_name = row.cashbox_name
                 break
 
-        if currency and cashbox_name:
-            preferred_mode_of_payment = self._build_currency_mode_of_payment(cashbox_name, currency)
-            if frappe.db.exists("Mode of Payment", preferred_mode_of_payment):
-                return preferred_mode_of_payment
+        if not fallback_mode_of_payment:
+            return ""
+
+        if not currency:
+            return fallback_mode_of_payment
+
+        # 1) Mappingdagi MOP nomidan currency suffix ni almashtirish
+        candidates = [self._replace_currency_suffix(fallback_mode_of_payment, currency)]
+
+        # 2) Legacy/new prefixlar bo'yicha nomlar
+        if cashbox_name:
+            candidates.append(f"iBox Kassa - {cashbox_name} ({currency})")
+            candidates.append(self._build_currency_mode_of_payment(cashbox_name, currency))
+
+        # 3) Oxirgi fallback
+        candidates.append(fallback_mode_of_payment)
+
+        for mop in candidates:
+            if mop and frappe.db.exists("Mode of Payment", mop):
+                return mop
 
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
         return f"iBox - {cashbox_name} ({currency})"
+
+    @staticmethod
+    def _replace_currency_suffix(mode_of_payment: str, currency: str) -> str:
+        """MOP nomi oxiridagi '(XXX)' ni berilgan currency ga almashtirish."""
+        if not mode_of_payment:
+            return mode_of_payment
+
+        if " (" in mode_of_payment and mode_of_payment.endswith(")"):
+            base = mode_of_payment.rsplit(" (", 1)[0]
+            return f"{base} ({currency})"
+
+        return mode_of_payment
 
     def _get_default_expense_party(self, company: str, party_type: str, currency: str = "UZS") -> str:
         """Payable/Receivable JE uchun default party topish yoki yaratish.
@@ -341,7 +369,38 @@ class PaymentMadeSyncHandler(BaseSyncHandler):
             "default_account"
         )
         if mop_account:
+            acc_currency = frappe.db.get_value("Account", mop_account, "account_currency")
+            if not acc_currency or acc_currency == currency:
+                return mop_account
+
+            # MOP account valyutasi mos kelmasa ham fallback qiladi
+            # (lekin oldin currencyga mos cash accountni qidiramiz)
+            mapped_by_currency = frappe.db.get_value(
+                "Account",
+                {
+                    "company": company,
+                    "account_type": "Cash",
+                    "is_group": 0,
+                    "account_currency": currency,
+                },
+                "name",
+            )
+            if mapped_by_currency:
+                return mapped_by_currency
             return mop_account
+
+        currency_cash = frappe.db.get_value(
+            "Account",
+            {
+                "company": company,
+                "account_type": "Cash",
+                "is_group": 0,
+                "account_currency": currency,
+            },
+            "name"
+        )
+        if currency_cash:
+            return currency_cash
 
         return frappe.db.get_value(
             "Account",

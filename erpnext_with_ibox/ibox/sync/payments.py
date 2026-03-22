@@ -114,7 +114,7 @@ class PaymentSyncHandler(BaseSyncHandler):
                 continue
 
             # paid_to — Mode of Payment dan topamiz
-            paid_to = self._get_paid_to_account(mode_of_payment, company_currency)
+            paid_to = self._get_paid_to_account(mode_of_payment, payment_currency)
             if not paid_to:
                 frappe.log_error(
                     title=f"Payments Config Error - {self.client_name}",
@@ -195,15 +195,39 @@ class PaymentSyncHandler(BaseSyncHandler):
                 cashbox_name = row.cashbox_name
                 break
 
-        if currency and cashbox_name:
-            preferred_mode_of_payment = self._build_currency_mode_of_payment(cashbox_name, currency)
-            if frappe.db.exists("Mode of Payment", preferred_mode_of_payment):
-                return preferred_mode_of_payment
+        if not fallback_mode_of_payment:
+            return ""
+
+        if not currency:
+            return fallback_mode_of_payment
+
+        candidates = [self._replace_currency_suffix(fallback_mode_of_payment, currency)]
+
+        if cashbox_name:
+            candidates.append(f"iBox Kassa - {cashbox_name} ({currency})")
+            candidates.append(self._build_currency_mode_of_payment(cashbox_name, currency))
+
+        candidates.append(fallback_mode_of_payment)
+
+        for mop in candidates:
+            if mop and frappe.db.exists("Mode of Payment", mop):
+                return mop
 
         return fallback_mode_of_payment
 
     def _build_currency_mode_of_payment(self, cashbox_name: str, currency: str) -> str:
         return f"iBox - {cashbox_name} ({currency})"
+
+    @staticmethod
+    def _replace_currency_suffix(mode_of_payment: str, currency: str) -> str:
+        if not mode_of_payment:
+            return mode_of_payment
+
+        if " (" in mode_of_payment and mode_of_payment.endswith(")"):
+            base = mode_of_payment.rsplit(" (", 1)[0]
+            return f"{base} ({currency})"
+
+        return mode_of_payment
 
     def _get_receivable_account(self, currency: str = "") -> str:
         """
@@ -280,7 +304,36 @@ class PaymentSyncHandler(BaseSyncHandler):
             "default_account"
         )
         if mop_account:
+            acc_currency = frappe.db.get_value("Account", mop_account, "account_currency")
+            if not acc_currency or acc_currency == currency:
+                return mop_account
+
+            currency_cash = frappe.db.get_value(
+                "Account",
+                {
+                    "company": company,
+                    "account_type": "Cash",
+                    "is_group": 0,
+                    "account_currency": currency,
+                },
+                "name"
+            )
+            if currency_cash:
+                return currency_cash
             return mop_account
+
+        currency_cash = frappe.db.get_value(
+            "Account",
+            {
+                "company": company,
+                "account_type": "Cash",
+                "is_group": 0,
+                "account_currency": currency,
+            },
+            "name"
+        )
+        if currency_cash:
+            return currency_cash
 
         # 2. Fallback: kompaniyaning Cash accountini topamiz
         cash_account = frappe.db.get_value(
