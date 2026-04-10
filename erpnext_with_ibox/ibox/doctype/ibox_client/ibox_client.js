@@ -436,6 +436,22 @@ frappe.ui.form.on("iBox Client", {
                 });
             }, __("Actions"));
 
+            // ── Setup Accounts ──────────────────────────────────────
+            frm.add_custom_button(__("Setup Accounts"), function () {
+                if (!frm.doc.company) {
+                    frappe.msgprint(__("Avval Company ni tanlang."));
+                    return;
+                }
+                if (!frm.doc.cashboxes || frm.doc.cashboxes.length === 0) {
+                    frappe.confirm(
+                        __("Cashbox mapping bo'sh. Avval 'Kassalarni Yuklash' tugmasini bosing.\n\nCashboxlarsiz davom etmoqchimisiz?"),
+                        function () { _run_setup_accounts(frm); }
+                    );
+                    return;
+                }
+                _run_setup_accounts(frm);
+            }, __("Admin"));
+
             // ── Sinxronizatsiyani To'xtatish ─────────────────────────
             frm.add_custom_button(__("Sinxronizatsiyani To'xtatish"), function () {
                 frappe.confirm(
@@ -462,6 +478,44 @@ frappe.ui.form.on("iBox Client", {
         }
     }
 });
+
+function _run_setup_accounts(frm) {
+    frappe.confirm(
+        __(
+            "Bu amal quyidagilarni yaratadi:\n\n" +
+            "• Purchase Accounts (UZS/USD Payable)\n" +
+            "• Sales Accounts (UZS/USD Receivable, Sales Income)\n" +
+            "• Salary Accounts (UZS/USD Expense, Cash)\n" +
+            "• Cashbox uchun Cash Account + Mode of Payment (UZS/USD)\n\n" +
+            "Mavjud accountlar qayta yaratilmaydi.\n\n" +
+            "Davom etsinmi?"
+        ),
+        function () {
+            frappe.call({
+                method: "setup_accounts",
+                doc: frm.doc,
+                freeze: true,
+                freeze_message: __("Accountlar yaratilmoqda..."),
+                callback: function (r) {
+                    if (r.message && r.message.success) {
+                        frappe.msgprint({
+                            title: __("Setup Yakunlandi"),
+                            indicator: "green",
+                            message: r.message.message
+                        });
+                        frm.reload_doc();
+                    } else {
+                        frappe.msgprint({
+                            title: __("Xatolik"),
+                            indicator: "red",
+                            message: (r.message && r.message.message) || __("Setup da xatolik yuz berdi")
+                        });
+                    }
+                }
+            });
+        }
+    );
+}
 
 function _set_date_range(frm, months) {
     let to_date = frappe.datetime.get_today();

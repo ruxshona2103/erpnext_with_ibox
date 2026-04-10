@@ -421,3 +421,241 @@ class iBoxClient(Document):
         """Stop flag va lock tozalash (backup)."""
         frappe.cache().delete_value(f"ibox_sync_stop_{self.name}")
         frappe.cache().delete_value(f"ibox_sync_lock_{self.name}")
+
+    # ── Setup Accounts ───────────────────────────────────────────────
+
+    @frappe.whitelist()
+    def setup_accounts(self):
+        """
+        iBox Client uchun barcha kerakli accountlar va Mode of Payment larni
+        avtomatik yaratish va iBox Client fieldlariga to'ldirish.
+
+        Yaratiladi:
+          1. Purchase: Payable (UZS/USD)
+          2. Sales: Receivable (UZS/USD), Sales Income (UZS/USD)
+          3. Salary: Expense (UZS/USD), Cash (UZS/USD)
+          4. Cashbox: har bir cashbox uchun Cash Account (UZS/USD) + Mode of Payment (UZS/USD)
+        """
+        if not self.company:
+            frappe.throw("Company tanlanmagan. Avval Company ni belgilang.")
+
+        company = self.company
+        abbr = frappe.db.get_value("Company", company, "abbr")
+        if not abbr:
+            frappe.throw(f"Company '{company}' da abbreviation topilmadi.")
+
+        client = self.name
+        created = []
+        skipped = []
+
+        # ── Helper: Account yaratish yoki mavjudini topish ───────────
+        def get_or_create_account(account_name, parent_account, account_type, currency):
+            full_name = f"{account_name} - {abbr}"
+            if frappe.db.exists("Account", full_name):
+                skipped.append(full_name)
+                return full_name
+
+            doc = frappe.get_doc({
+                "doctype": "Account",
+                "account_name": account_name,
+                "parent_account": parent_account,
+                "company": company,
+                "account_type": account_type,
+                "account_currency": currency,
+                "is_group": 0,
+            })
+            doc.insert(ignore_permissions=True)
+            created.append(full_name)
+            return full_name
+
+        # ── Helper: Mode of Payment yaratish ─────────────────────────
+        def get_or_create_mode_of_payment(mop_name, account_full_name):
+            if frappe.db.exists("Mode of Payment", mop_name):
+                # Account mapping mavjudligini tekshirish
+                existing = frappe.db.get_value(
+                    "Mode of Payment Account",
+                    {"parent": mop_name, "company": company},
+                    "default_account",
+                )
+                if not existing:
+                    mop_doc = frappe.get_doc("Mode of Payment", mop_name)
+                    mop_doc.append("accounts", {
+                        "company": company,
+                        "default_account": account_full_name,
+                    })
+                    mop_doc.save(ignore_permissions=True)
+                skipped.append(f"MoP: {mop_name}")
+                return mop_name
+
+            doc = frappe.get_doc({
+                "doctype": "Mode of Payment",
+                "mode_of_payment": mop_name,
+                "type": "Cash",
+                "accounts": [{
+                    "company": company,
+                    "default_account": account_full_name,
+                }],
+            })
+            doc.insert(ignore_permissions=True)
+            created.append(f"MoP: {mop_name}")
+            return mop_name
+
+        # ── Helper: Parent account topish ────────────────────────────
+        def find_parent(account_type_or_name, root_type=None):
+            """is_group=1 bo'lgan parent accountni topish."""
+            filters = {"company": company, "is_group": 1}
+            if root_type:
+                filters["root_type"] = root_type
+            if account_type_or_name:
+                filters["account_type"] = account_type_or_name
+            result = frappe.db.get_value("Account", filters, "name")
+            if result:
+                return result
+            # account_type bilan topilmasa, nom bo'yicha qidirish
+            return frappe.db.get_value(
+                "Account",
+                {"company": company, "is_group": 1, "name": ["like", f"%{account_type_or_name}%"]},
+                "name",
+            )
+
+        # ── Parent accountlarni aniqlash ─────────────────────────────
+        cash_parent = find_parent("Cash", "Asset")
+        if not cash_parent:
+            frappe.throw("'Cash In Hand' parent account topilmadi. Chart of Accounts ni tekshiring.")
+
+        receivable_parent = find_parent("", "Asset") or ""
+        # Receivable uchun maxsus: "Accounts Receivable" yoki "Debtors" group
+        receivable_parent = frappe.db.get_value(
+            "Account",
+            {"company": company, "is_group": 1, "name": ["like", "%Accounts Receivable%"]},
+            "name",
+        ) or frappe.db.get_value(
+            "Account",
+            {"company": company, "is_group": 1, "name": ["like", "%Debtors%"]},
+            "name",
+        )
+        if not receivable_parent:
+            frappe.throw("'Accounts Receivable' parent account topilmadi.")
+
+        payable_parent = frappe.db.get_value(
+            "Account",
+            {"company": company, "is_group": 1, "name": ["like", "%Accounts Payable%"]},
+            "name",
+        )
+        if not payable_parent:
+            frappe.throw("'Accounts Payable' parent account topilmadi.")
+
+        income_parent = frappe.db.get_value(
+            "Account",
+            {"company": company, "is_group": 1, "name": ["like", "%Direct Income%"]},
+            "name",
+        )
+        if not income_parent:
+            frappe.throw("'Direct Income' parent account topilmadi.")
+
+        expense_parent = frappe.db.get_value(
+            "Account",
+            {"company": company, "is_group": 1, "name": ["like", "%Indirect Expenses%"]},
+            "name",
+        )
+        if not expense_parent:
+            frappe.throw("'Indirect Expenses' parent account topilmadi.")
+
+        # ══════════════════════════════════════════════════════════════
+        # 1. PURCHASE ACCOUNTS (Payable)
+        # ══════════════════════════════════════════════════════════════
+        uzs_payable = get_or_create_account(
+            f"{client} - Payable (UZS)", payable_parent, "Payable", "UZS"
+        )
+        usd_payable = get_or_create_account(
+            f"{client} - Payable (USD)", payable_parent, "Payable", "USD"
+        )
+
+        # ══════════════════════════════════════════════════════════════
+        # 2. SALES ACCOUNTS (Receivable + Income)
+        # ══════════════════════════════════════════════════════════════
+        uzs_receivable = get_or_create_account(
+            f"{client} - Receivable (UZS)", receivable_parent, "Receivable", "UZS"
+        )
+        usd_receivable = get_or_create_account(
+            f"{client} - Receivable (USD)", receivable_parent, "Receivable", "USD"
+        )
+        uzs_sales_income = get_or_create_account(
+            f"{client} - Sales Income (UZS)", income_parent, "Income Account", "UZS"
+        )
+        usd_sales_income = get_or_create_account(
+            f"{client} - Sales Income (USD)", income_parent, "Income Account", "USD"
+        )
+
+        # ══════════════════════════════════════════════════════════════
+        # 3. SALARY ACCOUNTS (Expense + Cash)
+        # ══════════════════════════════════════════════════════════════
+        uzs_salary_expense = get_or_create_account(
+            f"{client} - Salary Expense (UZS)", expense_parent, "Expense Account", "UZS"
+        )
+        usd_salary_expense = get_or_create_account(
+            f"{client} - Salary Expense (USD)", expense_parent, "Expense Account", "USD"
+        )
+        uzs_salary_cash = get_or_create_account(
+            f"{client} - Salary Cash (UZS)", cash_parent, "Cash", "UZS"
+        )
+        usd_salary_cash = get_or_create_account(
+            f"{client} - Salary Cash (USD)", cash_parent, "Cash", "USD"
+        )
+
+        # ══════════════════════════════════════════════════════════════
+        # 4. CASHBOX ACCOUNTS + MODE OF PAYMENT
+        # ══════════════════════════════════════════════════════════════
+        for row in self.get("cashboxes", []):
+            cb_name = row.cashbox_name
+            if not cb_name:
+                continue
+
+            # Cash Accounts
+            uzs_cash_acc = get_or_create_account(
+                f"{client} - {cb_name} (UZS)", cash_parent, "Cash", "UZS"
+            )
+            usd_cash_acc = get_or_create_account(
+                f"{client} - {cb_name} (USD)", cash_parent, "Cash", "USD"
+            )
+
+            # Mode of Payment
+            uzs_mop = get_or_create_mode_of_payment(
+                f"{client} - {cb_name} (UZS)", uzs_cash_acc
+            )
+            usd_mop = get_or_create_mode_of_payment(
+                f"{client} - {cb_name} (USD)", usd_cash_acc
+            )
+
+            # Cashbox child table ni to'ldirish
+            row.mode_of_payment = uzs_mop
+            row.uzs_account = uzs_cash_acc
+            row.usd_account = usd_cash_acc
+
+        # ══════════════════════════════════════════════════════════════
+        # 5. iBox Client FIELDLARNI TO'LDIRISH
+        # ══════════════════════════════════════════════════════════════
+        self.uzs_payable_account = uzs_payable
+        self.usd_payable_account = usd_payable
+        self.uzs_receivable_account = uzs_receivable
+        self.usd_receivable_account = usd_receivable
+        self.uzs_sales_income = uzs_sales_income
+        self.usd_sales_income = usd_sales_income
+        self.uzs_salary_expense_account = uzs_salary_expense
+        self.usd_salary_expense_account = usd_salary_expense
+        self.uzs_salary_cash_account = uzs_salary_cash
+        self.usd_salary_cash_account = usd_salary_cash
+
+        self.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return {
+            "success": True,
+            "message": (
+                f"Setup yakunlandi!\n\n"
+                f"Yaratildi: {len(created)} ta\n"
+                f"Mavjud (o'tkazib yuborildi): {len(skipped)} ta\n\n"
+                f"Yaratilganlar:\n" + "\n".join(f"  • {c}" for c in created) if created
+                else f"Setup yakunlandi!\n\nBarcha accountlar allaqachon mavjud ({len(skipped)} ta)."
+            ),
+        }
