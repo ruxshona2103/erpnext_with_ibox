@@ -10,3 +10,4 @@ def execute():
             print("Account:", acc, "Currency:", doc.account_currency)
         except Exception:
             pass
+ 
