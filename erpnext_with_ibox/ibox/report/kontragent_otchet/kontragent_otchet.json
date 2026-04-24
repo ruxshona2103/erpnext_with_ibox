@@ -26,6 +26,12 @@
   },
   {
    "role": "System Manager"
+  },
+  {
+   "role": "kassa"
+  },
+  {
+   "role": "Taminotchi"
   }
  ]
 }

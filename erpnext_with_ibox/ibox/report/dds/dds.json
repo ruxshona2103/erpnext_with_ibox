@@ -28,6 +28,12 @@
   },
   {
    "role": "Auditor"
+  },
+  {
+   "role": "kassa"
+  },
+  {
+   "role": "Taminotchi"
   }
  ],
  "timeout": 0
