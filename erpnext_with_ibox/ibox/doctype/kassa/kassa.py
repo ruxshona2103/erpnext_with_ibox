@@ -79,7 +79,6 @@ class Kassa(Document):
         pe.party_type = self.party_type
         pe.party = self.party
 
-        # Set accounts
         pe.paid_from = self.get_paid_from_account(payment_type, party_account)
         pe.paid_to = self.get_paid_to_account(payment_type, party_account)
 
@@ -101,7 +100,6 @@ class Kassa(Document):
                 pe.paid_amount = flt(self.credit_amount)
                 pe.received_amount = flt(self.amount)
 
-        # Set reference to Kassa
         pe.reference_no = self.name
         pe.reference_date = self.date
         pe.remarks = self.remarks or f"Payment for {self.name}"
@@ -117,21 +115,18 @@ class Kassa(Document):
         ))
 
     def get_paid_from_account(self, payment_type, party_account=None):
-        """Payment type ga qarab paid_from accountni olish"""
         if payment_type == "Receive":
             return party_account or self.get_party_account()
         else:
             return self.cash_account
 
     def get_paid_to_account(self, payment_type, party_account=None):
-        """Payment type ga qarab paid_to accountni olish"""
         if payment_type == "Receive":
             return self.cash_account
         else:
             return party_account or self.get_party_account()
 
     def get_party_account(self):
-        """ERPNext party ledger logikasi bo'yicha account olish."""
         if self.party_type in ["Customer", "Supplier"]:
             return erpnext_get_party_account(self.party_type, self.party, self.company)
 
@@ -172,7 +167,6 @@ class Kassa(Document):
         return flt(rate)
 
     def set_payment_exchange_details(self):
-        """Приход/Расход uchun cash валютасидан party валютасига kurs va summa tayyorlash."""
         if not self.is_party_multicurrency_payment():
             if self.transaction_type in ["Приход", "Расход"]:
                 self.exchange_rate = 0
@@ -239,16 +233,22 @@ class Kassa(Document):
                 "credit_in_account_currency": flt(self.amount),
                 "account_currency": cash_account_currency,
                 "exchange_rate": exchange_rate,
-                "credit": flt(self.amount) * exchange_rate if exchange_rate else flt(self.amount)
+                "credit": flt(self.amount) * exchange_rate
             })
+
+            dividend_account_currency = frappe.get_cached_value("Account", dividend_account, "account_currency") or company_currency
+            dividend_exchange_rate = get_exchange_rate(dividend_account_currency, company_currency, self.date)
+            if not dividend_exchange_rate or dividend_exchange_rate == 0:
+                dividend_exchange_rate = exchange_rate
 
             je.append("accounts", {
                 "account": dividend_account,
-                "debit_in_account_currency": flt(self.amount) * exchange_rate if exchange_rate else flt(self.amount),
-                "account_currency": company_currency,
-                "exchange_rate": 1,
-                "debit": flt(self.amount) * exchange_rate if exchange_rate else flt(self.amount)
+                "debit_in_account_currency": flt(self.amount),
+                "account_currency": dividend_account_currency,
+                "exchange_rate": dividend_exchange_rate,
+                "debit": flt(self.amount) * dividend_exchange_rate
             })
+
         else:
             je.append("accounts", {
                 "account": self.cash_account,
@@ -277,7 +277,6 @@ class Kassa(Document):
         if not self.expense_account:
             frappe.throw(_("Пожалуйста, выберите счет расходов"))
 
-        # Expense Cost Center dan cost_center olish
         cost_center = frappe.db.get_value(
             "Expense Cost Center",
             {"expense_account": self.expense_account},
@@ -308,17 +307,24 @@ class Kassa(Document):
                 "credit_in_account_currency": flt(self.amount),
                 "account_currency": cash_account_currency,
                 "exchange_rate": exchange_rate,
-                "credit": flt(self.amount) * exchange_rate if exchange_rate else flt(self.amount)
+                "credit": flt(self.amount) * exchange_rate
             })
+
+
+            expense_exchange_rate = get_exchange_rate(expense_account_currency, company_currency, self.date)
+            if not expense_exchange_rate or expense_exchange_rate == 0:
+                expense_exchange_rate = exchange_rate
 
             je.append("accounts", {
                 "account": self.expense_account,
                 "cost_center": cost_center,
-                "debit_in_account_currency": flt(self.amount) * exchange_rate if exchange_rate else flt(self.amount),
+                "debit_in_account_currency": flt(self.amount),
                 "account_currency": expense_account_currency,
-                "exchange_rate": 1,
-                "debit": flt(self.amount) * exchange_rate if exchange_rate else flt(self.amount)
+                "exchange_rate": expense_exchange_rate,
+                "debit": flt(self.amount) * expense_exchange_rate
             })
+
+
         else:
             je.append("accounts", {
                 "account": self.cash_account,
@@ -351,13 +357,11 @@ class Kassa(Document):
         pe.company = self.company
         pe.mode_of_payment = self.mode_of_payment
 
-        # Set accounts - from and to
         pe.paid_from = self.cash_account
         pe.paid_to = self.cash_account_to
         pe.paid_amount = flt(self.amount)
         pe.received_amount = flt(self.amount)
 
-        # Set reference to Kassa
         pe.reference_no = self.name
         pe.reference_date = self.date
         pe.remarks = self.remarks or f"Transfer from {self.name}"
@@ -405,8 +409,6 @@ class Kassa(Document):
         ))
 
     def cancel_linked_entries(self):
-        """Bog'langan Payment Entry va Journal Entrylarni cancel qilish"""
-        # Cancel Payment Entries
         payment_entries = frappe.get_all("Payment Entry",
             filters={"reference_no": self.name, "docstatus": 1},
             pluck="name")
@@ -417,7 +419,6 @@ class Kassa(Document):
             pe.cancel()
             frappe.msgprint(_("Payment Entry {0} отменен").format(pe_name))
 
-        # Cancel Journal Entries (linked via cheque_no)
         journal_entries = frappe.get_all("Journal Entry",
             filters={"cheque_no": self.name, "docstatus": 1},
             pluck="name")
@@ -435,7 +436,6 @@ class Kassa(Document):
         self.db_set("linked_entry", name, update_modified=False)
 
     def set_default_company(self):
-        """Set default company for Перемещения if not set"""
         if self.transaction_type == "Перемещения" and not self.company:
             default_company = frappe.db.get_single_value("Global Defaults", "default_company")
             if default_company:
@@ -444,20 +444,17 @@ class Kassa(Document):
                 frappe.throw(_("Пожалуйста, установите компанию по умолчанию в настройках"))
 
     def set_cash_account(self):
-        """Mode of Payment dan cash accountni olish"""
         if self.mode_of_payment and self.company:
             cash_account = get_cash_account(self.mode_of_payment, self.company)
             if cash_account:
                 self.cash_account = cash_account
 
-        # Set cash_account_to for transfer/conversion
         if self.mode_of_payment_to and self.company:
             cash_account_to = get_cash_account(self.mode_of_payment_to, self.company)
             if cash_account_to:
                 self.cash_account_to = cash_account_to
 
     def set_cash_account_currency(self):
-        """Cash account valyutasini olish"""
         if self.cash_account:
             self.cash_account_currency = frappe.get_cached_value("Account", self.cash_account, "account_currency")
         if self.cash_account_to:
@@ -466,12 +463,10 @@ class Kassa(Document):
             )
 
     def set_party_currency(self):
-        """Party default valyutasini olish"""
         if self.party and self.party_type in ["Customer", "Supplier", "Employee"] and self.company:
             self.party_currency = get_party_currency(self.party_type, self.party, self.company)
 
     def set_display_currencies(self):
-        """Currency fieldlar uchun UI'da ishlatiladigan currency fieldlarni to'ldirish."""
         self.target_amount_currency = None
 
         if self.transaction_type == "Конвертация":
@@ -480,16 +475,13 @@ class Kassa(Document):
             self.target_amount_currency = self.party_currency or None
 
     def set_balance(self):
-        """Cash account balansini olish"""
         if self.cash_account:
             self.balance = get_account_balance(self.cash_account, self.company)
 
-        # Set balance_to for transfer/conversion
         if self.cash_account_to:
             self.balance_to = get_account_balance(self.cash_account_to, self.company)
 
     def validate_party(self):
-        """Party validatsiyasi"""
         if self.transaction_type in ["Приход", "Расход"]:
             if not self.party_type:
                 frappe.throw(_("Пожалуйста, выберите тип контрагента"))
@@ -508,7 +500,6 @@ class Kassa(Document):
                 self.expense_account = None
 
     def validate_transfer(self):
-        """Transfer validatsiyasi"""
         if self.transaction_type == "Перемещения":
             if not self.mode_of_payment_to:
                 frappe.throw(_("Пожалуйста, выберите способ оплаты (куда)"))
@@ -526,7 +517,6 @@ class Kassa(Document):
                 frappe.throw(_("Для перемещения способы оплаты должны иметь одинаковую валюту"))
 
     def validate_conversion(self):
-        """Conversion validatsiyasi"""
         if self.transaction_type == "Конвертация":
             if not self.mode_of_payment_to:
                 frappe.throw(_("Пожалуйста, выберите способ оплаты (куда)"))
@@ -552,7 +542,6 @@ class Kassa(Document):
                 )
 
     def validate_amount(self):
-        """Summa validatsiyasi"""
         if self.transaction_type == "Конвертация":
             return
 
@@ -566,7 +555,6 @@ class Kassa(Document):
             if flt(self.credit_amount) <= 0:
                 frappe.throw(_("Не удалось рассчитать сумму в валюте контрагента"))
 
-        # Rasxod uchun balansni tekshirish
         if self.transaction_type == "Расход" and flt(self.amount) > flt(self.balance):
             frappe.msgprint(
                 _("Внимание: Сумма расхода ({0}) превышает остаток кассы ({1})").format(
@@ -578,18 +566,11 @@ class Kassa(Document):
             )
 
     def validate_currency(self):
-        """Pokiza'da payment oqimi cash account valyutasi bo'yicha account tanlaydi.
-
-        Party currency foydalanuvchiga ma'lumot sifatida ko'rsatiladi, lekin
-        Приход/Расход operatsiyasini bloklamaydi. Asosiy accounting account
-        get_party_account_by_currency() orqali cash account currency bo'yicha tanlanadi.
-        """
         return
 
 
 @frappe.whitelist()
 def get_cash_account(mode_of_payment, company):
-    """Mode of Payment uchun cash accountni olish"""
     if not mode_of_payment or not company:
         return None
 
@@ -603,7 +584,6 @@ def get_cash_account(mode_of_payment, company):
 
 @frappe.whitelist()
 def get_cash_account_with_currency(mode_of_payment, company):
-    """Mode of Payment uchun cash account va currency olish"""
     if not mode_of_payment or not company:
         return {"account": None, "currency": None}
 
@@ -622,7 +602,6 @@ def get_cash_account_with_currency(mode_of_payment, company):
 
 @frappe.whitelist()
 def get_party_currency(party_type, party, company):
-    """Party uchun default currency olish"""
     if not party_type or not party or not company:
         return None
 
@@ -655,11 +634,9 @@ def get_party_currency(party_type, party, company):
 
 @frappe.whitelist()
 def get_account_balance(account, company):
-    """Account balansini account currency da olish"""
     if not account:
         return 0
 
-    # Get balance in account currency (debit_in_account_currency - credit_in_account_currency)
     balance = frappe.db.sql("""
         SELECT SUM(debit_in_account_currency) - SUM(credit_in_account_currency) as balance
         FROM `tabGL Entry`
@@ -675,7 +652,6 @@ def get_account_balance(account, company):
 
 @frappe.whitelist()
 def get_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
-    """5200 accounti ichidagi expense accountlarni olish."""
     company = (filters or {}).get("company")
     parent_account = get_expense_parent_account(company)
 
@@ -704,7 +680,6 @@ def get_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
 
 
 def get_expense_parent_account(company):
-    """5200 parent accountni company bo'yicha topish."""
     if not company:
         return None
 
@@ -735,7 +710,6 @@ def get_expense_parent_account(company):
 
 
 def validate_expense_account(expense_account, company):
-    """Expense account 5200 ichidagi leaf account ekanini tekshirish."""
     parent_account = get_expense_parent_account(company)
 
     if not parent_account:
@@ -766,7 +740,6 @@ def validate_expense_account(expense_account, company):
 
 @frappe.whitelist()
 def get_exchange_rate(from_currency, to_currency, date=None):
-    """Currency Exchange dan kursni olish"""
     if not date:
         date = frappe.utils.today()
 
