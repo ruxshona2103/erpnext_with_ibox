@@ -209,8 +209,11 @@ class Kassa(Document):
                 _("Счет дивидендов ({0}) не найден для компании {1}").format(account_number, self.company)
             )
 
-        cash_account_currency = frappe.get_cached_value("Account", self.cash_account, "account_currency")
+        cash_currency = frappe.get_cached_value("Account", self.cash_account, "account_currency")
         company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
+        dividend_currency = frappe.get_cached_value(
+            "Account", dividend_account, "account_currency"
+        ) or company_currency
 
         je = frappe.new_doc("Journal Entry")
         je.voucher_type = "Journal Entry"
@@ -220,46 +223,72 @@ class Kassa(Document):
         je.cheque_date = self.date
         je.user_remark = self.remarks or f"Dividend payment from {self.name}"
 
-        is_multicurrency = cash_account_currency != company_currency
+        is_multicurrency = (
+            cash_currency != company_currency
+            or dividend_currency != company_currency
+        )
 
         if is_multicurrency:
             je.multi_currency = 1
-            exchange_rate = get_exchange_rate(cash_account_currency, company_currency, self.date)
-            if not exchange_rate or exchange_rate == 0:
-                exchange_rate = 1
+
+            if cash_currency == company_currency:
+                cash_exchange_rate = 1
+            else:
+                cash_exchange_rate = get_exchange_rate(cash_currency, company_currency, self.date)
+                if not cash_exchange_rate or cash_exchange_rate == 0:
+                    frappe.throw(_("Не найден курс {0} к {1}").format(cash_currency, company_currency))
+
+            if dividend_currency == company_currency:
+                dividend_exchange_rate = 1
+            else:
+                dividend_exchange_rate = get_exchange_rate(dividend_currency, company_currency, self.date)
+                if not dividend_exchange_rate or dividend_exchange_rate == 0:
+                    frappe.throw(_("Не найден курс {0} к {1}").format(dividend_currency, company_currency))
 
             je.append("accounts", {
                 "account": self.cash_account,
+                "account_currency": cash_currency,
+                "exchange_rate": cash_exchange_rate,
                 "credit_in_account_currency": flt(self.amount),
-                "account_currency": cash_account_currency,
-                "exchange_rate": exchange_rate,
-                "credit": flt(self.amount) * exchange_rate
+                "credit": flt(self.amount) * cash_exchange_rate,
+                "debit_in_account_currency": 0,
+                "debit": 0,
             })
 
-            dividend_account_currency = frappe.get_cached_value("Account", dividend_account, "account_currency") or company_currency
-            dividend_exchange_rate = get_exchange_rate(dividend_account_currency, company_currency, self.date)
-            if not dividend_exchange_rate or dividend_exchange_rate == 0:
-                dividend_exchange_rate = exchange_rate
+            if cash_currency == dividend_currency:
+                dividend_amount = flt(self.amount)
+            else:
+                company_amount = flt(self.amount) * cash_exchange_rate
+                if dividend_exchange_rate and dividend_exchange_rate != 0:
+                    dividend_amount = company_amount / dividend_exchange_rate
+                else:
+                    dividend_amount = company_amount
 
             je.append("accounts", {
                 "account": dividend_account,
-                "debit_in_account_currency": flt(self.amount),
-                "account_currency": dividend_account_currency,
+                "account_currency": dividend_currency,
                 "exchange_rate": dividend_exchange_rate,
-                "debit": flt(self.amount) * dividend_exchange_rate
+                "debit_in_account_currency": flt(dividend_amount),
+                "debit": flt(dividend_amount) * dividend_exchange_rate,
+                "credit_in_account_currency": 0,
+                "credit": 0,
             })
 
         else:
             je.append("accounts", {
                 "account": self.cash_account,
                 "credit_in_account_currency": flt(self.amount),
-                "credit": flt(self.amount)
+                "credit": flt(self.amount),
+                "debit_in_account_currency": 0,
+                "debit": 0,
             })
 
             je.append("accounts", {
                 "account": dividend_account,
                 "debit_in_account_currency": flt(self.amount),
-                "debit": flt(self.amount)
+                "debit": flt(self.amount),
+                "credit_in_account_currency": 0,
+                "credit": 0,
             })
 
         je.flags.ignore_permissions = True
@@ -282,9 +311,12 @@ class Kassa(Document):
             {"expense_account": self.expense_account},
             "cost_center"
         )
-        cash_account_currency = frappe.get_cached_value("Account", self.cash_account, "account_currency")
+
+        cash_currency = frappe.get_cached_value("Account", self.cash_account, "account_currency")
         company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
-        expense_account_currency = frappe.get_cached_value("Account", self.expense_account, "account_currency") or company_currency
+        expense_currency = frappe.get_cached_value(
+            "Account", self.expense_account, "account_currency"
+        ) or company_currency
 
         je = frappe.new_doc("Journal Entry")
         je.voucher_type = "Journal Entry"
@@ -294,49 +326,74 @@ class Kassa(Document):
         je.cheque_date = self.date
         je.user_remark = self.remarks or f"Expense payment from {self.name}"
 
-        is_multicurrency = cash_account_currency != company_currency
+        is_multicurrency = (
+            cash_currency != company_currency
+            or expense_currency != company_currency
+        )
 
         if is_multicurrency:
             je.multi_currency = 1
-            exchange_rate = get_exchange_rate(cash_account_currency, company_currency, self.date)
-            if not exchange_rate or exchange_rate == 0:
-                exchange_rate = 1
+
+            if cash_currency == company_currency:
+                cash_exchange_rate = 1
+            else:
+                cash_exchange_rate = get_exchange_rate(cash_currency, company_currency, self.date)
+                if not cash_exchange_rate or cash_exchange_rate == 0:
+                    frappe.throw(_("Не найден курс {0} к {1}").format(cash_currency, company_currency))
+
+            if expense_currency == company_currency:
+                expense_exchange_rate = 1
+            else:
+                expense_exchange_rate = get_exchange_rate(expense_currency, company_currency, self.date)
+                if not expense_exchange_rate or expense_exchange_rate == 0:
+                    frappe.throw(_("Не найден курс {0} к {1}").format(expense_currency, company_currency))
 
             je.append("accounts", {
                 "account": self.cash_account,
+                "account_currency": cash_currency,
+                "exchange_rate": cash_exchange_rate,
                 "credit_in_account_currency": flt(self.amount),
-                "account_currency": cash_account_currency,
-                "exchange_rate": exchange_rate,
-                "credit": flt(self.amount) * exchange_rate
+                "credit": flt(self.amount) * cash_exchange_rate,
+                "debit_in_account_currency": 0,
+                "debit": 0,
             })
 
-
-            expense_exchange_rate = get_exchange_rate(expense_account_currency, company_currency, self.date)
-            if not expense_exchange_rate or expense_exchange_rate == 0:
-                expense_exchange_rate = exchange_rate
+            if cash_currency == expense_currency:
+                expense_amount = flt(self.amount)
+            else:
+                company_amount = flt(self.amount) * cash_exchange_rate
+                if expense_exchange_rate and expense_exchange_rate != 0:
+                    expense_amount = company_amount / expense_exchange_rate
+                else:
+                    expense_amount = company_amount
 
             je.append("accounts", {
                 "account": self.expense_account,
                 "cost_center": cost_center,
-                "debit_in_account_currency": flt(self.amount),
-                "account_currency": expense_account_currency,
+                "account_currency": expense_currency,
                 "exchange_rate": expense_exchange_rate,
-                "debit": flt(self.amount) * expense_exchange_rate
+                "debit_in_account_currency": flt(expense_amount),
+                "debit": flt(expense_amount) * expense_exchange_rate,
+                "credit_in_account_currency": 0,
+                "credit": 0,
             })
-
 
         else:
             je.append("accounts", {
                 "account": self.cash_account,
                 "credit_in_account_currency": flt(self.amount),
-                "credit": flt(self.amount)
+                "credit": flt(self.amount),
+                "debit_in_account_currency": 0,
+                "debit": 0,
             })
 
             je.append("accounts", {
                 "account": self.expense_account,
                 "cost_center": cost_center,
                 "debit_in_account_currency": flt(self.amount),
-                "debit": flt(self.amount)
+                "debit": flt(self.amount),
+                "credit_in_account_currency": 0,
+                "credit": 0,
             })
 
         je.flags.ignore_permissions = True
